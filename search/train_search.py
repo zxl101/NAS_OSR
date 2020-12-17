@@ -308,7 +308,7 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, cri
         pbar.set_description("[Step %d/%d]" % (step + 1, len(train_loader_model)))
         count+=1
         # break
-    logger.add_scalar('loss_step/train', epoch_loss/count, epoch)
+    logger.add_scalar('loss_epoch/train', epoch_loss/count, epoch)
     print("The training loss of this epoch is: {}".format(epoch_loss/count))
     torch.cuda.empty_cache()
     # del loss
