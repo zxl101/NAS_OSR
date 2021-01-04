@@ -21,7 +21,7 @@ if config.is_eval:
 else:
     config.save = 'train-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"))
 from dataloader import get_train_loader
-from datasets import Cityscapes
+# from datasets import Cityscapes
 
 from utils.init_func import init_weight
 from seg_opr.loss_opr import ProbOhemCrossEntropy2d
@@ -32,6 +32,8 @@ from utils.darts_utils import create_exp_dir, save, plot_op, plot_path_width, ob
 from model_seg import Network_Multi_Path_Infer as Network
 import seg_metrics
 
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
 
 
 def adjust_learning_rate(base_lr, power, optimizer, epoch, total_epoch):
@@ -64,22 +66,46 @@ def main():
     distill_criterion = nn.KLDivLoss()
 
     # data loader ###########################
-    if config.is_test:
-        data_setting = {'img_root': config.img_root_folder,
-                        'gt_root': config.gt_root_folder,
-                        'train_source': config.train_eval_source,
-                        'eval_source': config.eval_source,
-                        'test_source': config.test_source,
-                        'down_sampling': config.down_sampling}
-    else:
-        data_setting = {'img_root': config.img_root_folder,
-                        'gt_root': config.gt_root_folder,
-                        'train_source': config.train_source,
-                        'eval_source': config.eval_source,
-                        'test_source': config.test_source,
-                        'down_sampling': config.down_sampling}
+    # if config.is_test:
+    #     data_setting = {'img_root': config.img_root_folder,
+    #                     'gt_root': config.gt_root_folder,
+    #                     'train_source': config.train_eval_source,
+    #                     'eval_source': config.eval_source,
+    #                     'test_source': config.test_source,
+    #                     'down_sampling': config.down_sampling}
+    # else:
+    #     data_setting = {'img_root': config.img_root_folder,
+    #                     'gt_root': config.gt_root_folder,
+    #                     'train_source': config.train_source,
+    #                     'eval_source': config.eval_source,
+    #                     'test_source': config.test_source,
+    #                     'down_sampling': config.down_sampling}
+    #
+    # train_loader = get_train_loader(config, Cityscapes, test=config.is_test)
 
-    train_loader = get_train_loader(config, Cityscapes, test=config.is_test)
+    train_dataset = datasets.CIFAR10('data/cifar10', download=True, train=True,
+                                     transform=transforms.Compose([
+
+                                         transforms.ToTensor(),
+                                         transforms.Resize(64),
+                                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]))
+    train_loader_model = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
+
+    train_dataset_arch = datasets.CIFAR10('data/cifar10', download=False, train=True,
+                                          transform=transforms.Compose([
+
+                                              transforms.ToTensor(),
+                                              transforms.Resize(64),
+                                              transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]))
+    train_loader_arch = DataLoader(train_dataset_arch, batch_size=config.batch_size, shuffle=True, num_workers=4)
+
+    val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,
+                                   transform=transforms.Compose([
+
+                                       transforms.ToTensor(),
+                                       transforms.Resize(64),
+                                       transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]))
+    val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
 
     # Model #######################################

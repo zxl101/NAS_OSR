@@ -49,8 +49,8 @@ C.down_sampling = 2 # use downsampled images during search. In dataloader the im
 C.image_height = 32 # crop height after down_sampling in dataloader
 C.image_width = 32 # crop width after down_sampling in dataloader
 C.gt_down_sampling = 8 # model's default output size without final upsampling
-C.num_train_imgs = 2975 # number of training images
-C.num_eval_imgs = 500 # number of validation images
+C.num_train_imgs = 50000 # number of training images
+C.num_eval_imgs = 10000 # number of validation images
 
 """ Settings for network, this would be different for each kind of model"""
 C.bn_eps = 1e-5 # a value added to the BN denominator for numerical stability
@@ -79,8 +79,8 @@ C.arch_weight_decay = 0
 C.layers = 6 # layers (cells) for supernet
 C.branch = 2 # number of output branches
 
-C.pretrain = True
-# C.pretrain = "search-pretrain-256x512_F12.L16_batch3-20200101-012345"
+# C.pretrain = True
+C.pretrain = "search-pretrain-256x512_F12.L6_batch25-20201218-174809_ce_re_kl"
 ########################################
 # C.prun_modes = ['max', 'arch_ratio',] # channel pruning mode for [teacher, student], i.e. by default teacher will use max channel number, and student will sample the channel number based on arch_ratio
 C.prun_modes = ['arch_ratio',]
@@ -92,18 +92,18 @@ C.FPS_max = [0, 175.] # maximum FPS allowed for [teacher, student]
 if C.pretrain == True:
     C.batch_size = 25
     C.niters_per_epoch = max(C.num_train_imgs // 2 // C.batch_size, 400)
-    C.lr = 2e-2
+    C.lr = 2e-3
     C.latency_weight = [0, 0] # weight of latency penalty loss
     C.image_height = 256 # this size is after down_sampling
     C.image_width = 256*2
-    C.nepochs = 20
+    C.nepochs = 50
     C.save = "pretrain-%dx%d_F%d.L%d_batch%d"%(C.image_height, C.image_width, C.Fch, C.layers, C.batch_size)
 else:
-    C.batch_size = 2
+    C.batch_size = 25
     C.niters_per_epoch = max(C.num_train_imgs // 2 // C.batch_size, 400)
     C.latency_weight = [0, 1e-2,]
-    C.image_height = 224 # this size is after down_sampling
-    C.image_width = 224*2
+    C.image_height = 2 # this size is after down_sampling
+    C.image_width = 2
     C.nepochs = 30
     C.save = "%dx%d_F%d.L%d_batch%d"%(C.image_height, C.image_width, C.Fch, C.layers, C.batch_size)
 ########################################

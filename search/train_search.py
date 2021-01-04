@@ -126,11 +126,11 @@ def main(pretrain=True):
     lr_policy = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.978)
 
     # data loader ###########################
-    data_setting = {'img_root': config.img_root_folder,
-                    'gt_root': config.gt_root_folder,
-                    'train_source': config.train_source,
-                    'eval_source': config.eval_source,
-                    'down_sampling': config.down_sampling}
+    # data_setting = {'img_root': config.img_root_folder,
+    #                 'gt_root': config.gt_root_folder,
+    #                 'train_source': config.train_source,
+    #                 'eval_source': config.eval_source,
+    #                 'down_sampling': config.down_sampling}
     # train_loader_model = get_train_loader(config, Cityscapes, portion=config.train_portion)
     # train_loader_arch = get_train_loader(config, Cityscapes, portion=config.train_portion-1)
     #
@@ -191,37 +191,55 @@ def main(pretrain=True):
         with torch.no_grad():
             if pretrain == True:
                 model.module.prun_mode = "min"
-                loss = infer(epoch, model.module, val_loader, logger, FPS=False, config=config)
-                # for i in range(5):
-                logger.add_scalar('mIoU/val_min', loss, epoch)
-                logging.info("Epoch %d: valid_loss_min %.3f"%(epoch, loss))
+                ce_loss, re_loss, kl_loss = infer(epoch, model.module, val_loader, logger, FPS=False, config=config)
+                logger.add_scalar('ce_loss/val_min', ce_loss, epoch)
+                logger.add_scalar('re_loss/val_min', re_loss, epoch)
+                logger.add_scalar('kl_loss/val_min', kl_loss, epoch)
+                logging.info("Epoch %d: valid_ce_loss_min %.3f"%(epoch, ce_loss))
+                logging.info("Epoch %d: valid_re_loss_min %.3f" % (epoch, re_loss))
+                logging.info("Epoch %d: valid_kl_loss_min %.3f" % (epoch, kl_loss))
                 if len(model.module._width_mult_list) > 1:
                     model.module.prun_mode = "max"
-                    loss = infer(epoch, model.module, val_loader, logger, FPS=False, config=config)
-                    logger.add_scalar('mIoU/val_max', loss, epoch)
-                    logging.info("Epoch %d: valid_loss_max %.3f" % (epoch, loss))
+                    ce_loss, re_loss, kl_loss = infer(epoch, model.module, val_loader, logger, FPS=False, config=config)
+                    logger.add_scalar('ce_loss/val_max', ce_loss, epoch)
+                    logger.add_scalar('re_loss/val_max', re_loss, epoch)
+                    logger.add_scalar('kl_loss/val_max', kl_loss, epoch)
+                    logging.info("Epoch %d: valid_kl_loss_max %.3f" % (epoch, kl_loss))
+                    logging.info("Epoch %d: valid_ce_loss_max %.3f" % (epoch, ce_loss))
+                    logging.info("Epoch %d: valid_re_loss_max %.3f" % (epoch, re_loss))
                     model.module.prun_mode = "random"
-                    loss = infer(epoch, model.module, val_loader, logger, FPS=False, config=config)
-                    logger.add_scalar('mIoU/val_random', loss, epoch)
-                    logging.info("Epoch %d: valid_loss_random %.3f" % (epoch, loss))
+                    ce_loss, re_loss, kl_loss = infer(epoch, model.module, val_loader, logger, FPS=False, config=config)
+                    logger.add_scalar('ce_loss/val_random', ce_loss, epoch)
+                    logger.add_scalar('re_loss/val_random', re_loss, epoch)
+                    logger.add_scalar('kl_loss/val_random', kl_loss, epoch)
+                    logging.info("Epoch %d: valid_kl_loss_random %.3f" % (epoch, kl_loss))
+                    logging.info("Epoch %d: valid_ce_loss_random %.3f" % (epoch, ce_loss))
+                    logging.info("Epoch %d: valid_re_loss_random %.3f" % (epoch, re_loss))
             else:
                 valid_losses = []; FPSs = []
                 model.prun_mode = None
-                for idx in range(len(model._arch_names)):
+                for idx in range(len(model.module._arch_names)):
                     # arch_idx
-                    model.arch_idx = idx
-                    valid_loss, fps0, fps1 = infer(epoch, model, val_loader, logger, config=config)
-                    valid_losses.append(valid_loss)
-                    FPSs.append([fps0, fps1])
-                    logger.add_scalar('mIoU/val_min', loss, epoch)
-                    logging.info("Epoch %d: valid_loss_min %.3f" % (epoch, loss))
+                    model.module.arch_idx = idx
+                    # valid_loss, fps0, fps1 = infer(epoch, model.module, val_loader, logger, config=config)
+                    ce_loss, re_loss, kl_loss = infer(epoch, model.module, val_loader, logger, config=config)
+                    # valid_losses.append(valid_loss)
+                    # FPSs.append([fps0, fps1])
+                    # logger.add_scalar('mIoU/val_min', valid_loss, epoch)
+                    # logging.info("Epoch %d: valid_loss_min %.3f" % (epoch, loss))
+                    logger.add_scalar('ce_loss/val_search', ce_loss, epoch)
+                    logger.add_scalar('re_loss/val_search', re_loss, epoch)
+                    logger.add_scalar('kl_loss/val_search', kl_loss, epoch)
+                    logging.info("Epoch %d: valid_kl_loss_search %.3f" % (epoch, kl_loss))
+                    logging.info("Epoch %d: valid_ce_loss_search %.3f" % (epoch, ce_loss))
+                    logging.info("Epoch %d: valid_re_loss_search %.3f" % (epoch, re_loss))
                     # if config.latency_weight[idx] > 0:
                     #     logger.add_scalar('Objective/val_%s_8s_32s'%arch_names[idx], objective_acc_lat(valid_mIoUs[3], 1000./fps0), epoch)
                     #     logging.info("Epoch %d: Objective_%s_8s_32s %.3f"%(epoch, arch_names[idx], objective_acc_lat(valid_mIoUs[3], 1000./fps0)))
                     #     logger.add_scalar('Objective/val_%s_16s_32s'%arch_names[idx], objective_acc_lat(valid_mIoUs[4], 1000./fps1), epoch)
                     #     logging.info("Epoch %d: Objective_%s_16s_32s %.3f"%(epoch, arch_names[idx], objective_acc_lat(valid_mIoUs[4], 1000./fps1)))
-                valid_loss_history.append(valid_losses)
-                FPSs_history.append(FPSs)
+                # valid_loss_history.append(valid_losses)
+                # FPSs_history.append(FPSs)
                 if update_arch:
                     latency_supernet_history.append(architect.latency_supernet)
                 latency_weight_history.append(architect.latency_weight)
@@ -229,31 +247,34 @@ def main(pretrain=True):
         save(model, os.path.join(config.save, 'weights.pt'))
         if type(pretrain) == str:
             # contains arch_param names: {"alphas": alphas, "betas": betas, "gammas": gammas, "ratios": ratios}
-            for idx, arch_name in enumerate(model._arch_names):
+            for idx, arch_name in enumerate(model.module._arch_names):
                 state = {}
                 for name in arch_name['alphas']:
-                    state[name] = getattr(model, name)
+                    state[name] = getattr(model.module, name)
                 for name in arch_name['betas']:
-                    state[name] = getattr(model, name)
+                    state[name] = getattr(model.module, name)
                 for name in arch_name['ratios']:
-                    state[name] = getattr(model, name)
-                state["mIoU02"] = valid_mIoUs[3]
-                state["mIoU12"] = valid_mIoUs[4]
-                if pretrain is not True:
-                    state["latency02"] = 1000. / fps0
-                    state["latency12"] = 1000. / fps1
+                    state[name] = getattr(model.module, name)
+                # state["mIoU02"] = valid_mIoUs[3]
+                # state["mIoU12"] = valid_mIoUs[4]
+                state["ce_loss"] = ce_loss
+                state["re_loss"] = re_loss
+                state["kl_loss"] = kl_loss
+                # if pretrain is not True:
+                #     state["latency02"] = 1000. / fps0
+                #     state["latency12"] = 1000. / fps1
                 torch.save(state, os.path.join(config.save, "arch_%d_%d.pt"%(idx, epoch)))
                 torch.save(state, os.path.join(config.save, "arch_%d.pt"%(idx)))
 
-        if update_arch:
-            for idx in range(len(config.latency_weight)):
-                if config.latency_weight[idx] > 0:
-                    if (int(FPSs[idx][0] >= config.FPS_max[idx]) + int(FPSs[idx][1] >= config.FPS_max[idx])) >= 1:
-                        architect.latency_weight[idx] /= 2
-                    elif (int(FPSs[idx][0] <= config.FPS_min[idx]) + int(FPSs[idx][1] <= config.FPS_min[idx])) > 0:
-                        architect.latency_weight[idx] *= 2
-                    logger.add_scalar("arch/latency_weight_%s"%arch_names[idx], architect.latency_weight[idx], epoch+1)
-                    logging.info("arch_latency_weight_%s = "%arch_names[idx] + str(architect.latency_weight[idx]))
+        # if update_arch:
+        #     for idx in range(len(config.latency_weight)):
+        #         if config.latency_weight[idx] > 0:
+        #             if (int(FPSs[idx][0] >= config.FPS_max[idx]) + int(FPSs[idx][1] >= config.FPS_max[idx])) >= 1:
+        #                 architect.latency_weight[idx] /= 2
+        #             elif (int(FPSs[idx][0] <= config.FPS_min[idx]) + int(FPSs[idx][1] <= config.FPS_min[idx])) > 0:
+        #                 architect.latency_weight[idx] *= 2
+        #             logger.add_scalar("arch/latency_weight_%s"%arch_names[idx], architect.latency_weight[idx], epoch+1)
+        #             logging.info("arch_latency_weight_%s = "%arch_names[idx] + str(architect.latency_weight[idx]))
 
 
 def train(pretrain, train_loader_model, train_loader_arch, model, architect, criterion, optimizer, lr_policy, logger, epoch, update_arch=True, config = None):
@@ -263,7 +284,9 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, cri
     pbar = tqdm(range(config.niters_per_epoch), file=sys.stdout, bar_format=bar_format, ncols=80)
     dataloader_model = iter(train_loader_model)
     dataloader_arch = iter(train_loader_arch)
-    epoch_loss = 0
+    epoch_ce_loss = 0
+    epoch_re_loss = 0
+    epoch_kl_loss = 0
     count = 0
     for step in pbar:
         optimizer.zero_grad()
@@ -283,23 +306,28 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, cri
             pbar.set_description("[Arch Step %d/%d]" % (step + 1, len(train_loader_model)))
             minibatch = dataloader_arch.next()
             imgs_search = minibatch[0]
-            target_search = target_search.cuda(non_blocking=True)
+            target_search = minibatch[1]
             target_en_search = torch.Tensor(target_search.shape[0], config.num_classes)
             target_en_search.zero_()
             target_en_search.scatter_(1, target_search.view(-1, 1), 1)  # one-hot encoding
             target_en_search = target_en_search.cuda(non_blocking=True)
-            target_search = minibatch[1]
             imgs_search = imgs_search.cuda(non_blocking=True)
+            target_search = target_search.cuda(non_blocking=True)
 
             loss_arch = architect.step(imgs, target, target_en, imgs_search, target_search, target_en_search)
             if (step+1) % 10 == 0:
                 logger.add_scalar('loss_arch/train', loss_arch, epoch*len(pbar)+step)
                 logger.add_scalar('arch/latency_supernet', architect.latency_supernet, epoch*len(pbar)+step)
 
-        loss = model._loss(imgs, target, target_en, pretrain)
-        epoch_loss += loss
+        ce_loss, re_loss, kl_loss = model._loss(imgs, target, target_en, pretrain)
+        epoch_ce_loss += ce_loss
+        epoch_re_loss += re_loss
+        epoch_kl_loss += kl_loss
         # print("The training loss of this batch is: {}".format(loss))
-        logger.add_scalar('loss_step/train', loss, epoch*len(pbar)+step)
+        logger.add_scalar('loss_step/train_ce', ce_loss, epoch*len(pbar)+step)
+        logger.add_scalar('loss_step/train_re', re_loss, epoch * len(pbar) + step)
+        logger.add_scalar('loss_step/train_kl', kl_loss, epoch * len(pbar) + step)
+        loss = ce_loss + re_loss + kl_loss
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
         optimizer.step()
@@ -308,15 +336,19 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, cri
         pbar.set_description("[Step %d/%d]" % (step + 1, len(train_loader_model)))
         count+=1
         # break
-    logger.add_scalar('loss_epoch/train', epoch_loss/count, epoch)
-    print("The training loss of this epoch is: {}".format(epoch_loss/count))
+    logger.add_scalar('loss_epoch/train_ce', epoch_ce_loss/count, epoch)
+    logger.add_scalar('loss_epoch/train_re', epoch_re_loss / count, epoch)
+    logger.add_scalar('loss_epoch/train_kl', epoch_kl_loss / count, epoch)
+    print("The training loss of this epoch is: {}".format((epoch_ce_loss+epoch_re_loss+kl_loss)/count))
     torch.cuda.empty_cache()
     # del loss
     # if update_arch: del loss_arch
 
 def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.device("cuda")):
     model.eval()
-    loss = 0
+    total_ce_loss = 0
+    total_re_loss = 0
+    total_kl_loss = 0
     i = 0
     for data_val, target_val in val_loader:
         # print("Current working on {} batch".format(i))
@@ -325,18 +357,25 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         target_val_en.scatter_(1, target_val.view(-1, 1), 1)  # one-hot encoding
         target_val_en = target_val_en.to(device)
         data_val, target_val = data_val.cuda(), target_val.cuda()
-        c_loss = model._loss(data_val, target_val, target_val_en)
-        loss += c_loss
+        ce_loss, re_loss, kl_loss = model._loss(data_val, target_val, target_val_en)
+        total_ce_loss += ce_loss
+        total_re_loss += re_loss
+        total_kl_loss += kl_loss
         i += 1
         # print(c_loss)
         # break
-    loss = loss / i
-    print("The validation loss is: {}".format(loss))
-    if FPS:
-        fps0, fps1 = arch_logging(model, config, logger, epoch)
-        return loss, fps0, fps1
-    else:
-        return loss
+    total_ce_loss = total_ce_loss / i
+    total_re_loss = total_re_loss / i
+    total_kl_loss = total_kl_loss / i
+    print("The validation ce loss is: {}".format(total_ce_loss))
+    print("The validation re loss is: {}".format(total_re_loss))
+    print("The validation kl loss is: {}".format(total_kl_loss))
+    # if FPS:
+    #     fps0, fps1 = arch_logging(model, config, logger, epoch)
+    #     return total_ce_loss, fps0, fps1
+    # else:
+    #     return total_ce_loss, total_re_loss, total_kl_loss
+    return total_ce_loss, total_re_loss, total_kl_loss
 
 # def infer(epoch, model, val_loader, logger, FPS=True):
 #     model.eval()
@@ -355,7 +394,7 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
 
 
 def arch_logging(model, args, logger, epoch):
-    input_size = (1, 3, 1024, 2048)
+    input_size = (1, 3, 64, 64)
     net = Network_Multi_Path_Infer(
         [getattr(model, model._arch_names[model.arch_idx]["alphas"][0]).clone().detach(), getattr(model, model._arch_names[model.arch_idx]["alphas"][1]).clone().detach(), getattr(model, model._arch_names[model.arch_idx]["alphas"][2]).clone().detach()],
         [None, getattr(model, model._arch_names[model.arch_idx]["betas"][0]).clone().detach(), getattr(model, model._arch_names[model.arch_idx]["betas"][1]).clone().detach()],
@@ -369,22 +408,30 @@ def arch_logging(model, args, logger, epoch):
     plot_op(net.ops2, net.path2, F_base=args.Fch).savefig("table.png", bbox_inches="tight")
     logger.add_image("arch/ops2_arch%d"%model.arch_idx, np.swapaxes(np.swapaxes(plt.imread("table.png"), 0, 2), 1, 2), epoch)
 
-    net.build_structure([2, 0])
+    # net.build_structure([2, 0])
+    # net = net.cuda()
+    # net.eval()
+    # latency0, _ = net.forward_latency(input_size[1:])
+    # logger.add_scalar("arch/fps0_arch%d"%model.arch_idx, 1000./latency0, epoch)
+    # logger.add_figure("arch/path_width_arch%d_02"%model.arch_idx, plot_path_width([2, 0], [net.path2, net.path0], [net.widths2, net.widths0]), epoch)
+    #
+    # net.build_structure([2, 1])
+    # net = net.cuda()
+    # net.eval()
+    # latency1, _ = net.forward_latency(input_size[1:])
+    # logger.add_scalar("arch/fps1_arch%d"%model.arch_idx, 1000./latency1, epoch)
+    # logger.add_figure("arch/path_width_arch%d_12"%model.arch_idx, plot_path_width([2, 1], [net.path2, net.path1], [net.widths2, net.widths1]), epoch)
+
+    net.build_structure([2, 1, 0])
     net = net.cuda()
     net.eval()
-    latency0, _ = net.forward_latency(input_size[1:])
-    logger.add_scalar("arch/fps0_arch%d"%model.arch_idx, 1000./latency0, epoch)
-    logger.add_figure("arch/path_width_arch%d_02"%model.arch_idx, plot_path_width([2, 0], [net.path2, net.path0], [net.widths2, net.widths0]), epoch)
+    latency2, _ = net.forward_latency(input_size[1:])
+    logger.add_scalar("arch/fps2_arch%d" % model.arch_idx, 1000. / latency2, epoch)
+    logger.add_figure("arch/path_width_arch%d_012" % model.arch_idx,
+                      plot_path_width([2, 1, 0], [net.path2, net.path1, net.path0], [net.widths2, net.widths1, net.widths0]), epoch)
 
-    net.build_structure([2, 1])
-    net = net.cuda()
-    net.eval()
-    latency1, _ = net.forward_latency(input_size[1:])
-    logger.add_scalar("arch/fps1_arch%d"%model.arch_idx, 1000./latency1, epoch)
-    logger.add_figure("arch/path_width_arch%d_12"%model.arch_idx, plot_path_width([2, 1], [net.path2, net.path1], [net.widths2, net.widths1]), epoch)
-
-    return 1000./latency0, 1000./latency1
-
+    # return 1000./latency0, 1000./latency1, 1000./latency2
+    return 1000./latency2
 
 if __name__ == '__main__':
     main(pretrain=config.pretrain) 

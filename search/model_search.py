@@ -696,8 +696,8 @@ class Network_Multi_Path(nn.Module):
         # print("The cross entropy loss is: {}".format(lamda * ce_loss))
         # print("The kl divergence loss is: {}".format(beta * kl_loss))
         # loss = torch.mean(theta * re_loss + lamda * ce_loss + beta * kl_loss)
-        loss = ce_loss
-        return loss
+        # loss = ce_loss
+        return ce_loss, re_loss, torch.mean(kl_loss)
 
     def _build_arch_parameters(self, idx):
         num_ops = len(PRIMITIVES)

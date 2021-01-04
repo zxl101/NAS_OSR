@@ -5,7 +5,7 @@ from torch.nn import functional as F
 from operations import *
 from genotypes import PRIMITIVES
 from pdb import set_trace as bp
-from seg_oprs import FeatureFusion, Head
+# from seg_oprs import FeatureFusion, Head
 
 BatchNorm2d = nn.BatchNorm2d
 
@@ -161,19 +161,19 @@ class Cell(nn.Module):
         else:
             self._op = MixedOp(C_in, C_out, op_idx)
 
-        self.mean_layer = nn.Sequential(
-            nn.Linear(self.flat_dim * self.flat_dim * self._C_out, self.latent_dim)
-        )
-        self.var_layer = nn.Sequential(
-            nn.Linear(self.flat_dim * self.flat_dim * self._C_out, self.latent_dim)
-        )
+        # self.mean_layer = nn.Sequential(
+        #     nn.Linear(self.flat_dim * self.flat_dim * self._C_out, self.latent_dim)
+        # )
+        # self.var_layer = nn.Sequential(
+        #     nn.Linear(self.flat_dim * self.flat_dim * self._C_out, self.latent_dim)
+        # )
 
     def forward(self, input):
         out = self._op(input)
-        out_flat = out.view(-1, self._C_out * self.flat_dim * self.flat_dim)
-        mu, var = self.mean_layer(out_flat), self.var_layer(out_flat)
-        var = F.softplus(var) + 1e-8
-        return out, mu, var
+        # out_flat = out.view(-1, self._C_out * self.flat_dim * self.flat_dim)
+        # mu, var = self.mean_layer(out_flat), self.var_layer(out_flat)
+        # var = F.softplus(var) + 1e-8
+        return out
 
     def forward_latency(self, size):
         # ratios: (in, out, down)
@@ -182,7 +182,9 @@ class Cell(nn.Module):
 
 
 class Network_Multi_Path_Infer(nn.Module):
-    def __init__(self, alphas, betas, ratios, num_classes=10, in_channel=3, layers=9, criterion=nn.CrossEntropyLoss(ignore_index=-1), Fch=12, width_mult_list=[1.,], stem_head_width=(1., 1.)):
+    def __init__(self, alphas, betas, ratios, num_classes=10, in_channel=3, layers=9, criterion=nn.CrossEntropyLoss(ignore_index=-1),
+                 Fch=12, width_mult_list=[1.,], stem_head_width=(1., 1.), latent_dim32 = 32,
+                 latent_dim64=64, latent_dim128=128):
         super(Network_Multi_Path_Infer, self).__init__()
         self._num_classes = num_classes
         assert layers >= 2
@@ -190,6 +192,9 @@ class Network_Multi_Path_Infer(nn.Module):
         self._criterion = criterion
         self._Fch = Fch
         self.in_channel = in_channel
+        self.latent_dim32 = latent_dim32
+        self.latent_dim64 = latent_dim64
+        self.latent_dim128 = latent_dim128
         if ratios[0].size(1) == 1:
             self._width_mult_list = [1.,]
         else:
@@ -221,30 +226,81 @@ class Network_Multi_Path_Infer(nn.Module):
         self.build_arm_ffm_head()
 
     def build_arm_ffm_head(self):
-        if self.training:
-            if 2 in self.lasts:
-                self.heads32 = Head(self.num_filters(32, self._stem_head_width[1]), self._num_classes, True, norm_layer=BatchNorm2d)
-                if 1 in self.lasts:
-                    self.heads16 = Head(self.num_filters(16, self._stem_head_width[1])+self.ch_16, self._num_classes, True, norm_layer=BatchNorm2d)
-                else:
-                    self.heads16 = Head(self.ch_16, self._num_classes, True, norm_layer=BatchNorm2d)
-            else:
-                self.heads16 = Head(self.num_filters(16, self._stem_head_width[1]), self._num_classes, True, norm_layer=BatchNorm2d)
-        self.heads8 = Head(self.num_filters(8, self._stem_head_width[1]) * self._branch, self._num_classes, Fch=self._Fch, scale=4, branch=self._branch, is_aux=False, norm_layer=BatchNorm2d)
 
-        if 2 in self.lasts:
-            self.arms32 = nn.ModuleList([
-                ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]), 1, 1, 0, slimmable=False),
-                ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]), 1, 1, 0, slimmable=False),
-            ])
-            self.refines32 = nn.ModuleList([
-                ConvNorm(self.num_filters(16, self._stem_head_width[1])+self.ch_16, self.num_filters(16, self._stem_head_width[1]), 3, 1, 1, slimmable=False),
-                ConvNorm(self.num_filters(8, self._stem_head_width[1])+self.ch_8_2, self.num_filters(8, self._stem_head_width[1]), 3, 1, 1, slimmable=False),
-            ])
-        if 1 in self.lasts:
-            self.arms16 = ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]), 1, 1, 0, slimmable=False)
-            self.refines16 = ConvNorm(self.num_filters(8, self._stem_head_width[1])+self.ch_8_1, self.num_filters(8, self._stem_head_width[1]), 3, 1, 1, slimmable=False)
-        self.ffm = FeatureFusion(self.num_filters(8, self._stem_head_width[1]) * self._branch, self.num_filters(8, self._stem_head_width[1]) * self._branch, reduction=1, Fch=self._Fch, scale=8, branch=self._branch, norm_layer=BatchNorm2d)
+        self.classifier32 = nn.Linear(self.latent_dim32, self._num_classes)
+        self.one_hot32 = nn.Linear(self._num_classes, self.latent_dim32)
+
+        self.mean_layer32 = nn.Sequential(
+            nn.Linear(int(384 * 2 * 2), self.latent_dim32)
+        )
+        self.var_layer32 = nn.Sequential(
+            nn.Linear(int(384 * 2 * 2), self.latent_dim32)
+        )
+
+        self.classifier16 = nn.Linear(self.latent_dim64, self._num_classes)
+        self.one_hot16 = nn.Linear(self._num_classes, self.latent_dim64)
+
+        self.mean_layer16 = nn.Sequential(
+            nn.Linear(int(192 * 4 * 4), self.latent_dim64)
+        )
+        self.var_layer16 = nn.Sequential(
+            nn.Linear(int(192 * 4 * 4), self.latent_dim64)
+        )
+
+        self.classifier8 = nn.Linear(self.latent_dim128, self._num_classes)
+        self.one_hot8 = nn.Linear(self._num_classes, self.latent_dim128)
+
+        self.mean_layer8 = nn.Sequential(
+            nn.Linear(int(96 * 8 * 8), self.latent_dim128)
+        )
+        self.var_layer8 = nn.Sequential(
+            nn.Linear(int(96 * 8 * 8), self.latent_dim128)
+        )
+
+        self.refine32 = nn.ModuleList([
+            nn.ModuleList([
+                ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]), kernel_size=1, bias=False,
+                         groups=1, slimmable=False),
+                ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]), kernel_size=3, padding=1,
+                         bias=False, groups=1, slimmable=False),
+                ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]), kernel_size=1, bias=False,
+                         groups=1, slimmable=False),
+                ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]), kernel_size=3, padding=1,
+                         bias=False, groups=1, slimmable=False)]) ])
+        self.refine16 = nn.ModuleList([
+            nn.ModuleList([
+                ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]), kernel_size=1, bias=False,
+                         groups=1, slimmable=False),
+                ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]), kernel_size=3, padding=1,
+                         bias=False, groups=1, slimmable=False)]) ])
+        self.refine8 = nn.ModuleList([
+            ConvNorm(self.num_filters(8, self._stem_head_width[1]), self.num_filters(4, self._stem_head_width[1]), kernel_size=3,
+                     padding=1, bias=False, groups=1, slimmable=False) ])
+        self.refine4 = nn.ModuleList([
+            ConvNorm(self.num_filters(4, self._stem_head_width[1]), self.num_filters(2, self._stem_head_width[1]), kernel_size=3,
+                     padding=1, bias=False, groups=1, slimmable=False) ])
+        self.refine2 = nn.ModuleList([
+            ConvNorm(self.num_filters(2, self._stem_head_width[1]), self.num_filters(1, self._stem_head_width[1]), kernel_size=3,
+                     padding=1, bias=False, groups=1, slimmable=False) ])
+        self.refine1 = nn.ModuleList([
+            ConvNorm(self.num_filters(1, self._stem_head_width[1]), self.num_filters(1, self._stem_head_width[1]), kernel_size=3,
+                     padding=1, bias=False, groups=1, slimmable=False) ])
+        self.reconstruct = nn.ModuleList([
+            ConvNorm(self.num_filters(1, self._stem_head_width[1]), 3, kernel_size=3,
+                     padding=1, bias=False, groups=1, slimmable=False) ])
+        # if 2 in self.lasts:
+        #     self.arms32 = nn.ModuleList([
+        #         ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]), 1, 1, 0, slimmable=False),
+        #         ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]), 1, 1, 0, slimmable=False),
+        #     ])
+        #     self.refines32 = nn.ModuleList([
+        #         ConvNorm(self.num_filters(16, self._stem_head_width[1])+self.ch_16, self.num_filters(16, self._stem_head_width[1]), 3, 1, 1, slimmable=False),
+        #         ConvNorm(self.num_filters(8, self._stem_head_width[1])+self.ch_8_2, self.num_filters(8, self._stem_head_width[1]), 3, 1, 1, slimmable=False),
+        #     ])
+        # if 1 in self.lasts:
+        #     self.arms16 = ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]), 1, 1, 0, slimmable=False)
+        #     self.refines16 = ConvNorm(self.num_filters(8, self._stem_head_width[1])+self.ch_8_1, self.num_filters(8, self._stem_head_width[1]), 3, 1, 1, slimmable=False)
+        # self.ffm = FeatureFusion(self.num_filters(8, self._stem_head_width[1]) * self._branch, self.num_filters(8, self._stem_head_width[1]) * self._branch, reduction=1, Fch=self._Fch, scale=8, branch=self._branch, norm_layer=BatchNorm2d)
 
     def get_branch_groups_cells(self, ops, paths, downs, widths, lasts):
         num_branch = len(ops)

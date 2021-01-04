@@ -29,7 +29,8 @@ class Architect(object):
         print("architect initialized!")
 
     def _compute_unrolled_model(self, input, target, target_de, eta, network_optimizer):
-        loss = self.model._loss(input, target, target_de)
+        ce_loss, re_loss, kl_loss = self.model._loss(input, target, target_de)
+        loss = ce_loss + re_loss + kl_loss
         theta = _concat(self.model.parameters()).data
         try:
             moment = _concat(network_optimizer.state[v]['momentum_buffer'] for v in self.model.parameters()).mul_(self.network_momentum)
@@ -45,7 +46,8 @@ class Architect(object):
         if unrolled:
                 loss = self._backward_step_unrolled(input_train, target_train, target_train_de, input_valid, target_valid, target_valid_de, eta, network_optimizer)
         else:
-                loss, loss_latency = self._backward_step(input_valid, target_valid, target_valid_de)
+                ce_loss, re_loss, kl_loss, loss_latency = self._backward_step(input_valid, target_valid, target_valid_de)
+                loss = ce_loss + re_loss + kl_loss
         loss.backward()
         if loss_latency != 0: loss_latency.backward()
         for optimizer in self.optimizers:
@@ -53,7 +55,7 @@ class Architect(object):
         return loss + loss_latency
 
     def _backward_step(self, input_valid, target_valid, target_de):
-        loss = self.model._loss(input_valid, target_valid, target_de)
+        ce_loss, re_loss, kl_loss = self.model._loss(input_valid, target_valid, target_de)
         loss_latency = 0
         self.latency_supernet = 0
         self.model.prun_mode = None
@@ -73,11 +75,13 @@ class Architect(object):
                 self.latency_supernet = latency
                 loss_latency = loss_latency + latency * self.latency_weight[idx]
 
-        return loss, loss_latency
+        return ce_loss, re_loss, kl_loss, loss_latency
 
     def _backward_step_unrolled(self, input_train, target_train, target_train_de, input_valid, target_valid, target_valid_de, eta, network_optimizer):
         unrolled_model = self._compute_unrolled_model(input_train, target_train, target_train_de, eta, network_optimizer)
-        unrolled_loss = unrolled_model._loss(input_valid, target_valid, target_valid_de)
+        # unrolled_loss = unrolled_model._loss(input_valid, target_valid, target_valid_de)
+        ce_loss, kl_loss, re_loss = unrolled_model._loss(input_valid, target_valid, target_valid_de)
+        unrolled_loss = ce_loss + kl_loss + re_loss
 
         unrolled_loss.backward()
         dalpha = [v.grad for v in unrolled_model.arch_parameters()]
