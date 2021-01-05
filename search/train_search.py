@@ -61,10 +61,10 @@ def main(pretrain=True):
 
     # config network and criterion ################
     min_kept = int(config.batch_size * config.image_height * config.image_width // (16 * config.gt_down_sampling ** 2))
-    ohem_criterion = ProbOhemCrossEntropy2d(ignore_label=255, thresh=0.7, min_kept=min_kept, use_weight=False)
+    # ohem_criterion = ProbOhemCrossEntropy2d(ignore_label=255, thresh=0.7, min_kept=min_kept, use_weight=False)
 
     # Model #######################################
-    model = Network(config.num_classes, config.in_channel, config.layers, ohem_criterion, Fch=config.Fch, width_mult_list=config.width_mult_list, prun_modes=config.prun_modes, stem_head_width=config.stem_head_width)
+    model = Network(config.num_classes, config.in_channel, config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list, prun_modes=config.prun_modes, stem_head_width=config.stem_head_width)
     # input_check = (torch.randn(1, 3, 64, 64,device=torch.device("cpu")),torch.randn(1, device=torch.device("cpu")), torch.randn(1,10,device=torch.device("cpu")))
     # # for item in input_check:
     # #     item.to(torch.device("cuda"))
@@ -181,7 +181,7 @@ def main(pretrain=True):
 
         # training
         tbar.set_description("[Epoch %d/%d][train...]" % (epoch + 1, config.nepochs))
-        train(pretrain, train_loader_model, train_loader_arch, model.module, architect, ohem_criterion, optimizer, lr_policy, logger, epoch, update_arch=update_arch, config=config)
+        train(pretrain, train_loader_model, train_loader_arch, model, architect, optimizer, lr_policy, logger, epoch, update_arch=update_arch, config=config)
         torch.cuda.empty_cache()
         lr_policy.step()
 
@@ -191,7 +191,7 @@ def main(pretrain=True):
         with torch.no_grad():
             if pretrain == True:
                 model.module.prun_mode = "min"
-                ce_loss, re_loss, kl_loss = infer(epoch, model.module, val_loader, logger, FPS=False, config=config)
+                ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config)
                 logger.add_scalar('ce_loss/val_min', ce_loss, epoch)
                 logger.add_scalar('re_loss/val_min', re_loss, epoch)
                 logger.add_scalar('kl_loss/val_min', kl_loss, epoch)
@@ -200,7 +200,7 @@ def main(pretrain=True):
                 logging.info("Epoch %d: valid_kl_loss_min %.3f" % (epoch, kl_loss))
                 if len(model.module._width_mult_list) > 1:
                     model.module.prun_mode = "max"
-                    ce_loss, re_loss, kl_loss = infer(epoch, model.module, val_loader, logger, FPS=False, config=config)
+                    ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config)
                     logger.add_scalar('ce_loss/val_max', ce_loss, epoch)
                     logger.add_scalar('re_loss/val_max', re_loss, epoch)
                     logger.add_scalar('kl_loss/val_max', kl_loss, epoch)
@@ -208,7 +208,7 @@ def main(pretrain=True):
                     logging.info("Epoch %d: valid_ce_loss_max %.3f" % (epoch, ce_loss))
                     logging.info("Epoch %d: valid_re_loss_max %.3f" % (epoch, re_loss))
                     model.module.prun_mode = "random"
-                    ce_loss, re_loss, kl_loss = infer(epoch, model.module, val_loader, logger, FPS=False, config=config)
+                    ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config)
                     logger.add_scalar('ce_loss/val_random', ce_loss, epoch)
                     logger.add_scalar('re_loss/val_random', re_loss, epoch)
                     logger.add_scalar('kl_loss/val_random', kl_loss, epoch)
@@ -222,7 +222,7 @@ def main(pretrain=True):
                     # arch_idx
                     model.module.arch_idx = idx
                     # valid_loss, fps0, fps1 = infer(epoch, model.module, val_loader, logger, config=config)
-                    ce_loss, re_loss, kl_loss = infer(epoch, model.module, val_loader, logger, config=config)
+                    ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, config=config)
                     # valid_losses.append(valid_loss)
                     # FPSs.append([fps0, fps1])
                     # logger.add_scalar('mIoU/val_min', valid_loss, epoch)
@@ -277,7 +277,7 @@ def main(pretrain=True):
         #             logging.info("arch_latency_weight_%s = "%arch_names[idx] + str(architect.latency_weight[idx]))
 
 
-def train(pretrain, train_loader_model, train_loader_arch, model, architect, criterion, optimizer, lr_policy, logger, epoch, update_arch=True, config = None):
+def train(pretrain, train_loader_model, train_loader_arch, model, architect, optimizer, lr_policy, logger, epoch, update_arch=True, config = None):
     model.train()
 
     bar_format = '{desc}[{elapsed}<{remaining},{rate_fmt}]'
@@ -319,7 +319,10 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, cri
                 logger.add_scalar('loss_arch/train', loss_arch, epoch*len(pbar)+step)
                 logger.add_scalar('arch/latency_supernet', architect.latency_supernet, epoch*len(pbar)+step)
 
-        ce_loss, re_loss, kl_loss = model._loss(imgs, target, target_en, pretrain)
+        ce_loss, re_loss, kl_loss = model(imgs, target, target_en, pretrain)
+        ce_loss = torch.mean(ce_loss)
+        re_loss = torch.mean(re_loss)
+        kl_loss = torch.mean(kl_loss)
         epoch_ce_loss += ce_loss
         epoch_re_loss += re_loss
         epoch_kl_loss += kl_loss
@@ -329,7 +332,7 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, cri
         logger.add_scalar('loss_step/train_kl', kl_loss, epoch * len(pbar) + step)
         loss = ce_loss + re_loss + kl_loss
         loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+        nn.utils.clip_grad_norm_(model.module.parameters(), config.grad_clip)
         optimizer.step()
         optimizer.zero_grad()
 
@@ -357,7 +360,10 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         target_val_en.scatter_(1, target_val.view(-1, 1), 1)  # one-hot encoding
         target_val_en = target_val_en.to(device)
         data_val, target_val = data_val.cuda(), target_val.cuda()
-        ce_loss, re_loss, kl_loss = model._loss(data_val, target_val, target_val_en)
+        ce_loss, re_loss, kl_loss = model(data_val, target_val, target_val_en)
+        ce_loss = torch.mean(ce_loss)
+        re_loss = torch.mean(re_loss)
+        kl_loss = torch.mean(kl_loss)
         total_ce_loss += ce_loss
         total_re_loss += re_loss
         total_kl_loss += kl_loss

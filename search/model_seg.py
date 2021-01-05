@@ -448,9 +448,9 @@ class Network_Multi_Path_Infer(nn.Module):
         stem = self.stem(input)
 
         # store the last feature map w. corresponding scale of each branch
-        outputs8 = [stem] * self._branch
-        outputs16 = [stem] * self._branch
-        outputs32 = [stem] * self._branch
+        # outputs8 = [stem] * self._branch
+        # outputs16 = [stem] * self._branch
+        # outputs32 = [stem] * self._branch
         outputs = [stem] * self._branch
 
         for layer in range(len(self.branch_groups)):
@@ -462,9 +462,12 @@ class Network_Multi_Path_Infer(nn.Module):
                     # if scale == 8: outputs8[branch] = output
                     # elif scale == 16: outputs16[branch] = output
                     # elif scale == 32: outputs32[branch] = output
-                    if scale == 8: outputs8 = output
-                    elif scale == 16: outputs16 = output
-                    elif scale == 32: outputs32 = output
+                    if scale == 8:
+                        outputs8 = output
+                    elif scale == 16:
+                        outputs16 = output
+                    elif scale == 32:
+                        outputs32 = output
         
         # if self.training:
         #     pred8, pred16, pred32, reconstructed = self.agg_ffm(outputs8, outputs16, outputs32)

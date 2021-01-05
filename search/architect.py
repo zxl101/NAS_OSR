@@ -29,7 +29,7 @@ class Architect(object):
         print("architect initialized!")
 
     def _compute_unrolled_model(self, input, target, target_de, eta, network_optimizer):
-        ce_loss, re_loss, kl_loss = self.model._loss(input, target, target_de)
+        ce_loss, re_loss, kl_loss = self.model(input, target, target_de)
         loss = ce_loss + re_loss + kl_loss
         theta = _concat(self.model.parameters()).data
         try:
@@ -55,7 +55,7 @@ class Architect(object):
         return loss + loss_latency
 
     def _backward_step(self, input_valid, target_valid, target_de):
-        ce_loss, re_loss, kl_loss = self.model._loss(input_valid, target_valid, target_de)
+        ce_loss, re_loss, kl_loss = self.model(input_valid, target_valid, target_de)
         loss_latency = 0
         self.latency_supernet = 0
         self.model.prun_mode = None
@@ -117,12 +117,12 @@ class Architect(object):
         R = r / _concat(vector).norm()
         for p, v in zip(self.model.parameters(), vector):
             p.data.add_(R, v)
-        loss = self.model._loss(input, target, target_de)
+        loss = self.model(input, target, target_de)
         grads_p = torch.autograd.grad(loss, self.model.arch_parameters())
 
         for p, v in zip(self.model.parameters(), vector):
             p.data.sub_(2*R, v)
-        loss = self.model._loss(input, target, target_de)
+        loss = self.model(input, target, target_de)
         grads_n = torch.autograd.grad(loss, self.model.arch_parameters())
 
         for p, v in zip(self.model.parameters(), vector):

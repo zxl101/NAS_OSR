@@ -78,20 +78,20 @@ C.mode = "student" # "teacher" or "student"
 if C.mode == "teacher":
     ##### train teacher model only ####################################
     C.arch_idx = [0] # 0 for teacher
-    C.branch = [2] # number of output branches
+    C.branch = [3] # number of output branches
     C.width_mult_list = [4./12, 6./12, 8./12, 10./12, 1.,] # selection choices for channel pruning
     C.stem_head_width = [(1, 1)] # width ratio (#channel / Fch) for [teacher, student]
     C.load_path = "fasterseg" # path to the searched directory
     C.load_epoch = "last" # "last" or "int" (e.g. "30"): which epoch to load from the searched architecture
     C.batch_size = 12
     C.Fch = 12 # base channel number
-    C.image_height = 512 # crop size for training
-    C.image_width = 1024
+    C.image_height = 64 # crop size for training
+    C.image_width = 64
     C.save = "%dx%d_teacher_batch%d"%(C.image_height, C.image_width, C.batch_size)
 elif C.mode == "student":
     ##### train student with KL distillation from teacher ##############
     C.arch_idx = [0, 1] # 0 for teacher, 1 for student
-    C.branch = [2, 2]
+    C.branch = [3, 3]
     C.width_mult_list = [4./12, 6./12, 8./12, 10./12, 1.,]
     C.stem_head_width = [(1, 1), (8./12, 8./12),]
     C.load_path = "fasterseg" # path to the searched directory

@@ -357,7 +357,7 @@ class Network_Multi_Path(nn.Module):
                 ratios2_sampled.append(np.random.choice(self._width_mult_list))
             return [ratios0_sampled, ratios1_sampled, ratios2_sampled]
 
-    def forward(self, input, label, label_en):
+    def _forward(self, input, label, label_en):
         # out_prev: cell-state
         # index 0: keep; index 1: down
         stem = self.stem[self.arch_idx]
@@ -634,7 +634,7 @@ class Network_Multi_Path(nn.Module):
         return latency
         ###################################
 
-    def _loss(self, input, target, target_de, pretrain=False):
+    def forward(self, input, target, target_de, pretrain=False):
         # print(target)
         re_loss = 0
         ce_loss = 0
@@ -647,7 +647,7 @@ class Network_Multi_Path(nn.Module):
             self.prun_mode = None
             for idx in range(len(self._arch_names)):
                 self.arch_idx = idx
-                mu_latent, var_latent, yh, predict, reconstructed = self(input, target, target_de)
+                mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
                 re_loss = re_loss + reconstruction_function(input, reconstructed)
                 for i in range(3):
                     pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
@@ -655,7 +655,7 @@ class Network_Multi_Path(nn.Module):
                     kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
         if len(self._width_mult_list) > 1:
             self.prun_mode = "max"
-            mu_latent, var_latent, yh, predict, reconstructed = self(input, target, target_de)
+            mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
             re_loss = re_loss + reconstruction_function(input, reconstructed)
             # print(predict[1].shape)
             for i in range(3):
@@ -663,7 +663,7 @@ class Network_Multi_Path(nn.Module):
                 ce_loss = ce_loss + nllloss(predict[i], target)
                 kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
             self.prun_mode = "min"
-            mu_latent, var_latent, yh, predict, reconstructed = self(input, target, target_de)
+            mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
             re_loss = re_loss + reconstruction_function(input, reconstructed)
             for i in range(3):
                 pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
@@ -671,14 +671,14 @@ class Network_Multi_Path(nn.Module):
                 kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
             if pretrain == True:
                 self.prun_mode = "random"
-                mu_latent, var_latent, yh, predict, reconstructed = self(input, target, target_de)
+                mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
                 re_loss = re_loss + reconstruction_function(input, reconstructed)
                 for i in range(3):
                     pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
                     ce_loss = ce_loss + nllloss(predict[i], target)
                     kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
                 self.prun_mode = "random"
-                mu_latent, var_latent, yh, predict, reconstructed = self(input, target, target_de)
+                mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
                 re_loss = re_loss + reconstruction_function(input, reconstructed)
                 for i in range(3):
                     pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
@@ -686,7 +686,7 @@ class Network_Multi_Path(nn.Module):
                     kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
         elif pretrain == True and len(self._width_mult_list) == 1:
             self.prun_mode = "max"
-            mu_latent, var_latent, yh, predict, reconstructed = self(input, target, target_de)
+            mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
             re_loss = re_loss + reconstruction_function(input, reconstructed)
             for i in range(3):
                 pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
