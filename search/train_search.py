@@ -70,8 +70,8 @@ def main(pretrain=True):
     # #     item.to(torch.device("cuda"))
     # flops, params = profile(model, inputs= input_check, verbose=False)
     # logging.info("params = %fMB, FLOPs = %fGB", params / 1e6, flops / 1e9)
-
-    model = model.cuda()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
 
     if type(pretrain) == str:
         partial = torch.load(pretrain + "/weights.pt", map_location='cuda:0')
@@ -81,7 +81,7 @@ def main(pretrain=True):
         model.load_state_dict(state)
     else:
         init_weight(model, nn.init.kaiming_normal_, nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     model = nn.DataParallel(model)
     model.to(device)
     architect = Architect(model.module, config)
@@ -181,7 +181,7 @@ def main(pretrain=True):
 
         # training
         tbar.set_description("[Epoch %d/%d][train...]" % (epoch + 1, config.nepochs))
-        train(pretrain, train_loader_model, train_loader_arch, model, architect, optimizer, lr_policy, logger, epoch, update_arch=update_arch, config=config)
+        train(pretrain, train_loader_model, train_loader_arch, model, architect, optimizer, lr_policy, logger, epoch, update_arch=update_arch, config=config, device=device)
         torch.cuda.empty_cache()
         lr_policy.step()
 
@@ -277,7 +277,7 @@ def main(pretrain=True):
         #             logging.info("arch_latency_weight_%s = "%arch_names[idx] + str(architect.latency_weight[idx]))
 
 
-def train(pretrain, train_loader_model, train_loader_arch, model, architect, optimizer, lr_policy, logger, epoch, update_arch=True, config = None):
+def train(pretrain, train_loader_model, train_loader_arch, model, architect, optimizer, lr_policy, logger, epoch, update_arch=True, config = None, device = None):
     model.train()
 
     bar_format = '{desc}[{elapsed}<{remaining},{rate_fmt}]'
@@ -297,9 +297,9 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
         target_en = torch.Tensor(target.shape[0], config.num_classes)
         target_en.zero_()
         target_en.scatter_(1, target.view(-1, 1), 1)  # one-hot encoding
-        target_en = target_en.cuda(non_blocking=True)
-        imgs = imgs.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
+        target_en = target_en.to(device)
+        imgs = imgs.to(device)
+        target = target.to(device)
 
         if update_arch:
             # get a random minibatch from the search queue with replacement
@@ -310,9 +310,9 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
             target_en_search = torch.Tensor(target_search.shape[0], config.num_classes)
             target_en_search.zero_()
             target_en_search.scatter_(1, target_search.view(-1, 1), 1)  # one-hot encoding
-            target_en_search = target_en_search.cuda(non_blocking=True)
-            imgs_search = imgs_search.cuda(non_blocking=True)
-            target_search = target_search.cuda(non_blocking=True)
+            target_en_search = target_en_search.to(device)
+            imgs_search = imgs_search.to(device)
+            target_search = target_search.to(device)
 
             loss_arch = architect.step(imgs, target, target_en, imgs_search, target_search, target_en_search)
             if (step+1) % 10 == 0:
@@ -359,7 +359,7 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         target_val_en.zero_()
         target_val_en.scatter_(1, target_val.view(-1, 1), 1)  # one-hot encoding
         target_val_en = target_val_en.to(device)
-        data_val, target_val = data_val.cuda(), target_val.cuda()
+        data_val, target_val = data_val.to(device), target_val.to(device)
         ce_loss, re_loss, kl_loss = model(data_val, target_val, target_val_en)
         ce_loss = torch.mean(ce_loss)
         re_loss = torch.mean(re_loss)
@@ -429,7 +429,7 @@ def arch_logging(model, args, logger, epoch):
     # logger.add_figure("arch/path_width_arch%d_12"%model.arch_idx, plot_path_width([2, 1], [net.path2, net.path1], [net.widths2, net.widths1]), epoch)
 
     net.build_structure([2, 1, 0])
-    net = net.cuda()
+    net = net.to(device)
     net.eval()
     latency2, _ = net.forward_latency(input_size[1:])
     logger.add_scalar("arch/fps2_arch%d" % model.arch_idx, 1000. / latency2, epoch)
