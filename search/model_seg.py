@@ -9,6 +9,12 @@ from pdb import set_trace as bp
 
 BatchNorm2d = nn.BatchNorm2d
 
+def sample_gaussian(m, v):
+    sample = torch.randn(m.shape).cuda()
+    # sample = torch.randn(m.shape)
+    z = m + (v**0.5)*sample
+    return z
+
 def softmax(x):
     return np.exp(x) / (np.exp(x).sum() + np.spacing(1))
 
@@ -360,40 +366,82 @@ class Network_Multi_Path_Infer(nn.Module):
         return groups_all, cells
     
     def agg_ffm(self, outputs8, outputs16, outputs32):
-        pred32 = []; pred16 = []; pred8 = [] # order of predictions is not important
+        # pred32 = []; pred16 = []; pred8 = [] # order of predictions is not important
         for branch in range(self._branch):
             last = self.lasts[branch]
-            if last == 2:
-                if self.training: pred32.append(outputs32[branch])
-                out = self.arms32[0](outputs32[branch])
-                out = F.interpolate(out, size=(int(out.size(2))*2, int(out.size(3))*2), mode='bilinear', align_corners=True)
-                out = self.refines32[0](torch.cat([out, outputs16[branch]], dim=1))
-                if self.training: pred16.append(outputs16[branch])
-                out = self.arms32[1](out)
-                out = F.interpolate(out, size=(int(out.size(2))*2, int(out.size(3))*2), mode='bilinear', align_corners=True)
-                out = self.refines32[1](torch.cat([out, outputs8[branch]], dim=1))
-                pred8.append(out)
-            elif last == 1:
-                if self.training: pred16.append(outputs16[branch])
-                out = self.arms16(outputs16[branch])
-                out = F.interpolate(out, size=(int(out.size(2))*2, int(out.size(3))*2), mode='bilinear', align_corners=True)
-                out = self.refines16(torch.cat([out, outputs8[branch]], dim=1))
-                pred8.append(out)
-            elif last == 0:
-                pred8.append(outputs8[branch])
-        if len(pred32) > 0:
-            pred32 = self.heads32(torch.cat(pred32, dim=1))
-        else:
-            pred32 = None
-        if len(pred16) > 0:
-            pred16 = self.heads16(torch.cat(pred16, dim=1))
-        else:
-            pred16 = None
-        pred8 = self.heads8(self.ffm(torch.cat(pred8, dim=1)))
-        if self.training: 
-            return pred8, pred16, pred32
-        else:
-            return pred8
+            # if last == 2:
+            #     pred32 = outputs32[branch]
+            #     # out = self.arms32[0](outputs32[branch])
+            #     # out = F.interpolate(out, size=(int(out.size(2))*2, int(out.size(3))*2), mode='bilinear', align_corners=True)
+            #     # out = self.refines32[0](torch.cat([out, outputs16[branch]], dim=1))
+            #     # if self.training: pred16.append(outputs16[branch])
+            #     # out = self.arms32[1](out)
+            #     # out = F.interpolate(out, size=(int(out.size(2))*2, int(out.size(3))*2), mode='bilinear', align_corners=True)
+            #     # out = self.refines32[1](torch.cat([out, outputs8[branch]], dim=1))
+            #     # pred8.append(out)
+            # elif last == 1:
+            #     pred16 = outputs16[branch]
+            #     # out = self.arms16(outputs16[branch])
+            #     # out = F.interpolate(out, size=(int(out.size(2))*2, int(out.size(3))*2), mode='bilinear', align_corners=True)
+            #     # out = self.refines16(torch.cat([out, outputs8[branch]], dim=1))
+            #     # pred8.append(out)
+            # elif last == 0:
+            #     pred8 = outputs8[branch]
+
+        out_flat32 = outputs32.view(-1, int(384 * 2 * 2))
+        latent_mu32, latent_var32 = self.mean_layer32(out_flat32), self.var_layer32(out_flat32)
+        latent_var32 = F.softplus(latent_var32) + 1e-8
+        # latent_mu, latent_var = mu_var_dic["{}_{}".format(self._layers-1, 2)]
+        latent32 = sample_gaussian(latent_mu32, latent_var32)
+        predict32 = F.log_softmax(self.classifier32(latent32), dim=1)
+        # print(predict)
+        # predict_test32 = F.log_softmax(self.classifier32(latent_mu), dim=1)
+        # yh32 = self.one_hot32(label_en)
+
+        out_flat16 = outputs16.view(-1, int(192 * 4 * 4))
+        latent_mu16, latent_var16 = self.mean_layer16(out_flat16), self.var_layer16(out_flat16)
+        latent_var16 = F.softplus(latent_var16) + 1e-8
+        # latent_mu, latent_var = mu_var_dic["{}_{}".format(self._layers-1, 2)]
+        latent16 = sample_gaussian(latent_mu16, latent_var16)
+        predict16 = F.log_softmax(self.classifier16(latent16), dim=1)
+        # print(predict)
+        # predict_test16 = F.log_softmax(self.classifier16(latent_mu), dim=1)
+        # yh16 = self.one_hot16(label_en)
+
+        out_flat8 = outputs8.view(-1, int(96 * 8 * 8))
+        latent_mu8, latent_var8 = self.mean_layer8(out_flat8), self.var_layer8(out_flat8)
+        latent_var8 = F.softplus(latent_var8) + 1e-8
+        # latent_mu, latent_var = mu_var_dic["{}_{}".format(self._layers-1, 2)]
+        latent8 = sample_gaussian(latent_mu8, latent_var8)
+        predict8 = F.log_softmax(self.classifier8(latent8), dim=1)
+        # print(predict)
+        # predict_test8 = F.log_softmax(self.classifier8(latent_mu), dim=1)
+        # yh8 = self.one_hot8(label_en)
+
+        out32 = outputs32
+        out16 = F.interpolate(self.refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
+        out16 = self.refine32[1](torch.cat([out16, outputs16], dim=1))
+        out8 = F.interpolate(self.refine16[0](out16), scale_factor=2, mode="bilinear", align_corners=True)
+        out8 = self.refine16[1](torch.cat([out8, outputs8], dim=1))
+        out4 = F.interpolate(self.refine8(out8), scale_factor=2, mode="bilinear", align_corners=True)
+        out2 = F.interpolate(self.refine4(out4), scale_factor=2, mode="bilinear", align_corners=True)
+        out1 = F.interpolate(self.refine2(out2), scale_factor=2, mode="bilinear", align_corners=True)
+        reconstructed = self.reconstruct(self.refine1(out1))
+
+        return predict32, predict16, predict8, reconstructed
+        # if len(pred32) > 0:
+        #     pred32 = self.heads32(torch.cat(pred32, dim=1))
+        # else:
+        #     pred32 = None
+        # if len(pred16) > 0:
+        #     pred16 = self.heads16(torch.cat(pred16, dim=1))
+        # else:
+        #     pred16 = None
+        # pred8 = self.heads8(self.ffm(torch.cat(pred8, dim=1)))
+        # if self.training:
+        #     return pred8, pred16, pred32
+        # else:
+        #     return pred8
 
     def forward(self, input):
         _, _, H, W = input.size()
@@ -411,20 +459,24 @@ class Network_Multi_Path_Infer(nn.Module):
                 scale = int(H // output.size(2))
                 for branch in group:
                     outputs[branch] = output
-                    if scale == 8: outputs8[branch] = output
-                    elif scale == 16: outputs16[branch] = output
-                    elif scale == 32: outputs32[branch] = output
+                    # if scale == 8: outputs8[branch] = output
+                    # elif scale == 16: outputs16[branch] = output
+                    # elif scale == 32: outputs32[branch] = output
+                    if scale == 8: outputs8 = output
+                    elif scale == 16: outputs16 = output
+                    elif scale == 32: outputs32 = output
         
-        if self.training:
-            pred8, pred16, pred32 = self.agg_ffm(outputs8, outputs16, outputs32)
-            pred8 = F.interpolate(pred8, scale_factor=8, mode='bilinear', align_corners=True)
-            if pred16 is not None: pred16 = F.interpolate(pred16, scale_factor=16, mode='bilinear', align_corners=True)
-            if pred32 is not None: pred32 = F.interpolate(pred32, scale_factor=32, mode='bilinear', align_corners=True)
-            return pred8, pred16, pred32
-        else:
-            pred8 = self.agg_ffm(outputs8, outputs16, outputs32)
-            out = F.interpolate(pred8, size=(int(pred8.size(2))*8, int(pred8.size(3))*8), mode='bilinear', align_corners=True)
-            return out
+        # if self.training:
+        #     pred8, pred16, pred32, reconstructed = self.agg_ffm(outputs8, outputs16, outputs32)
+        #     pred8 = F.interpolate(pred8, scale_factor=8, mode='bilinear', align_corners=True)
+        #     if pred16 is not None: pred16 = F.interpolate(pred16, scale_factor=16, mode='bilinear', align_corners=True)
+        #     if pred32 is not None: pred32 = F.interpolate(pred32, scale_factor=32, mode='bilinear', align_corners=True)
+        #     return pred8, pred16, pred32
+        # else:
+        #     pred8 = self.agg_ffm(outputs8, outputs16, outputs32)
+        #     out = F.interpolate(pred8, size=(int(pred8.size(2))*8, int(pred8.size(3))*8), mode='bilinear', align_corners=True)
+        pred8, pred16, pred32, reconstructed = self.agg_ffm(outputs8, outputs16, outputs32)
+        return pred8, pred16, pred32, reconstructed
     
     def forward_latency(self, size):
         _, H, W = size
