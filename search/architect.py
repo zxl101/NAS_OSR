@@ -21,7 +21,7 @@ class Architect(object):
         self._kl = nn.KLDivLoss().cuda()
         self.optimizers = [
             torch.optim.Adam(arch_param, lr=args.arch_learning_rate, betas=(0.5, 0.999))#, weight_decay=args.arch_weight_decay)
-            for arch_param in self.model._arch_parameters ]
+            for arch_param in self.model.module._arch_parameters ]
         self.latency_weight = args.latency_weight
         # assert len(self.latency_weight) == len(self.optimizers)
         self.latency = 0
@@ -31,12 +31,12 @@ class Architect(object):
     def _compute_unrolled_model(self, input, target, target_de, eta, network_optimizer):
         ce_loss, re_loss, kl_loss = self.model(input, target, target_de)
         loss = ce_loss + re_loss + kl_loss
-        theta = _concat(self.model.parameters()).data
+        theta = _concat(self.model.module.parameters()).data
         try:
-            moment = _concat(network_optimizer.state[v]['momentum_buffer'] for v in self.model.parameters()).mul_(self.network_momentum)
+            moment = _concat(network_optimizer.state[v]['momentum_buffer'] for v in self.model.module.parameters()).mul_(self.network_momentum)
         except:
             moment = torch.zeros_like(theta)
-        dtheta = _concat(torch.autograd.grad(loss, self.model.parameters())).data + self.network_weight_decay*theta
+        dtheta = _concat(torch.autograd.grad(loss, self.model.module.parameters())).data + self.network_weight_decay*theta
         unrolled_model = self._construct_model_from_theta(theta.sub(eta, moment+dtheta))
         return unrolled_model
 
@@ -46,52 +46,54 @@ class Architect(object):
         if unrolled:
                 loss = self._backward_step_unrolled(input_train, target_train, target_train_de, input_valid, target_valid, target_valid_de, eta, network_optimizer)
         else:
-                ce_loss, re_loss, kl_loss, loss_latency = self._backward_step(input_valid, target_valid, target_valid_de)
+                ce_loss, re_loss, kl_loss = self._backward_step(input_valid, target_valid, target_valid_de)
                 loss = ce_loss + re_loss + kl_loss
+        loss = torch.mean(loss)
         loss.backward()
-        if loss_latency != 0: loss_latency.backward()
+        # if loss_latency != 0: loss_latency.backward()
         for optimizer in self.optimizers:
             optimizer.step()
-        return loss + loss_latency
+        return loss
 
     def _backward_step(self, input_valid, target_valid, target_de):
         ce_loss, re_loss, kl_loss = self.model(input_valid, target_valid, target_de)
         loss_latency = 0
         self.latency_supernet = 0
-        self.model.prun_mode = None
-        for idx in range(len(self.optimizers)):
-            self.model.arch_idx = idx
-            if self.latency_weight[idx] > 0:
-                latency = 0
-                if len(self.model._width_mult_list) == 1:
-                    r0 = 1./500; r1 = 499./500
-                    latency = latency + r0 * self.model.forward_latency((3, 1024, 2048), alpha=True, beta=False, ratio=False)
-                    latency = latency + r1 * self.model.forward_latency((3, 1024, 2048), alpha=False, beta=True, ratio=False)
-                else:
-                    r0 = 1./500; r1 = 497./500; r2 = 2./500
-                    latency = latency + r0 * self.model.forward_latency((3, 1024, 2048), alpha=True, beta=False, ratio=False)
-                    latency = latency + r1 * self.model.forward_latency((3, 1024, 2048), alpha=False, beta=True, ratio=False)
-                    latency = latency + r2 * self.model.forward_latency((3, 1024, 2048), alpha=False, beta=False, ratio=True)
-                self.latency_supernet = latency
-                loss_latency = loss_latency + latency * self.latency_weight[idx]
+        self.model.module.prun_mode = None
+        # for idx in range(len(self.optimizers)):
+        #     self.model.module.arch_idx = idx
+        #     if self.latency_weight[idx] > 0:
+        #         latency = 0
+        #         if len(self.model.module._width_mult_list) == 1:
+        #             r0 = 1./500; r1 = 499./500
+        #             latency = latency + r0 * self.model.module.forward_latency((3, 1024, 2048), alpha=True, beta=False, ratio=False)
+        #             latency = latency + r1 * self.model.module.forward_latency((3, 1024, 2048), alpha=False, beta=True, ratio=False)
+        #         else:
+        #             r0 = 1./500; r1 = 497./500; r2 = 2./500
+        #             latency = latency + r0 * self.model.module.forward_latency((3, 1024, 2048), alpha=True, beta=False, ratio=False)
+        #             latency = latency + r1 * self.model.module.forward_latency((3, 1024, 2048), alpha=False, beta=True, ratio=False)
+        #             latency = latency + r2 * self.model.module.forward_latency((3, 1024, 2048), alpha=False, beta=False, ratio=True)
+        #         self.latency_supernet = latency
+        #         loss_latency = loss_latency + latency * self.latency_weight[idx]
 
-        return ce_loss, re_loss, kl_loss, loss_latency
+        return ce_loss, re_loss, kl_loss
 
     def _backward_step_unrolled(self, input_train, target_train, target_train_de, input_valid, target_valid, target_valid_de, eta, network_optimizer):
         unrolled_model = self._compute_unrolled_model(input_train, target_train, target_train_de, eta, network_optimizer)
         # unrolled_loss = unrolled_model._loss(input_valid, target_valid, target_valid_de)
-        ce_loss, kl_loss, re_loss = unrolled_model._loss(input_valid, target_valid, target_valid_de)
+        unrolled_model = nn.DataParallel(unrolled_model)
+        ce_loss, kl_loss, re_loss = unrolled_model(input_valid, target_valid, target_valid_de)
         unrolled_loss = ce_loss + kl_loss + re_loss
 
         unrolled_loss.backward()
-        dalpha = [v.grad for v in unrolled_model.arch_parameters()]
-        vector = [v.grad.data for v in unrolled_model.parameters()]
+        dalpha = [v.grad for v in unrolled_model.module.arch_parameters()]
+        vector = [v.grad.data for v in unrolled_model.module.parameters()]
         implicit_grads = self._hessian_vector_product(vector, input_train, target_train, target_train_de)
 
         for g, ig in zip(dalpha, implicit_grads):
             g.data.sub_(eta, ig.data)
 
-        for v, g in zip(self.model.arch_parameters(), dalpha):
+        for v, g in zip(self.model.module.arch_parameters(), dalpha):
             if v.grad is None:
                 v.grad = Variable(g.data)
             else:
@@ -99,8 +101,8 @@ class Architect(object):
         return unrolled_loss
 
     def _construct_model_from_theta(self, theta):
-        model_new = self.model.new()
-        model_dict = self.model.state_dict()
+        model_new = self.model.module.new()
+        model_dict = self.model.module.state_dict()
 
         params, offset = {}, 0
         for k, v in self.model.named_parameters():

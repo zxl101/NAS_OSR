@@ -24,7 +24,7 @@ from dataloader import get_train_loader
 # from datasets import Cityscapes
 
 from utils.init_func import init_weight
-from seg_opr.loss_opr import ProbOhemCrossEntropy2d
+# from seg_opr.loss_opr import ProbOhemCrossEntropy2d
 from eval import SegEvaluator
 from test import SegTester
 
@@ -34,6 +34,9 @@ import seg_metrics
 
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
+
+reconstruction_function = nn.MSELoss()
+reconstruction_function.size_average = False
 
 
 def adjust_learning_rate(base_lr, power, optimizer, epoch, total_epoch):
@@ -62,8 +65,9 @@ def main():
 
     # config network and criterion ################
     min_kept = int(config.batch_size * config.image_height * config.image_width // (16 * config.gt_down_sampling ** 2))
-    ohem_criterion = ProbOhemCrossEntropy2d(ignore_label=255, thresh=0.7, min_kept=min_kept, use_weight=False)
-    distill_criterion = nn.KLDivLoss()
+    # criterion = ProbOhemCrossEntropy2d(ignore_label=255, thresh=0.7, min_kept=min_kept, use_weight=False)
+    # distill_criterion = nn.KLDivLoss()
+    criterion = nn.NLLLoss()
 
     # data loader ###########################
     # if config.is_test:
@@ -89,15 +93,9 @@ def main():
                                          transforms.ToTensor(),
                                          transforms.Resize(64),
                                          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]))
-    train_loader_model = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
-    train_dataset_arch = datasets.CIFAR10('data/cifar10', download=False, train=True,
-                                          transform=transforms.Compose([
 
-                                              transforms.ToTensor(),
-                                              transforms.Resize(64),
-                                              transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]))
-    train_loader_arch = DataLoader(train_dataset_arch, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
     val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,
                                    transform=transforms.Compose([
@@ -125,10 +123,11 @@ def main():
             [state["ratio_%d_0"%arch_idx].detach(), state["ratio_%d_1"%arch_idx].detach(), state["ratio_%d_2"%arch_idx].detach()],
             num_classes=config.num_classes, layers=config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list, stem_head_width=config.stem_head_width[idx], ignore_skip=arch_idx==0)
 
-        mIoU02 = state["mIoU02"]; latency02 = state["latency02"]; obj02 = objective_acc_lat(mIoU02, latency02)
-        mIoU12 = state["mIoU12"]; latency12 = state["latency12"]; obj12 = objective_acc_lat(mIoU12, latency12)
-        if obj02 > obj12: last = [2, 0]
-        else: last = [2, 1]
+        # mIoU02 = state["mIoU02"]; latency02 = state["latency02"]; obj02 = objective_acc_lat(mIoU02, latency02)
+        # mIoU12 = state["mIoU12"]; latency12 = state["latency12"]; obj12 = objective_acc_lat(mIoU12, latency12)
+        # if obj02 > obj12: last = [2, 0]
+        # else: last = [2, 1]
+        last = [2,1,0]
         lasts.append(last)
         model.build_structure(last)
         logging.info("net: " + str(model))
@@ -160,14 +159,14 @@ def main():
             state.update(pretrained_dict)
             model.load_state_dict(state)
 
-        evaluator = SegEvaluator(Cityscapes(data_setting, 'val', None), config.num_classes, config.image_mean,
-                                 config.image_std, model, config.eval_scale_array, config.eval_flip, 0, out_idx=0, config=config,
-                                 verbose=False, save_path=None, show_image=False, show_prediction=False)
-        evaluators.append(evaluator)
-        tester = SegTester(Cityscapes(data_setting, 'test', None), config.num_classes, config.image_mean,
-                                 config.image_std, model, config.eval_scale_array, config.eval_flip, 0, out_idx=0, config=config,
-                                 verbose=False, save_path=None, show_prediction=False)
-        testers.append(tester)
+        # evaluator = SegEvaluator(Cityscapes(data_setting, 'val', None), config.num_classes, config.image_mean,
+        #                          config.image_std, model, config.eval_scale_array, config.eval_flip, 0, out_idx=0, config=config,
+        #                          verbose=False, save_path=None, show_image=False, show_prediction=False)
+        # evaluators.append(evaluator)
+        # tester = SegTester(Cityscapes(data_setting, 'test', None), config.num_classes, config.image_mean,
+        #                          config.image_std, model, config.eval_scale_array, config.eval_flip, 0, out_idx=0, config=config,
+        #                          verbose=False, save_path=None, show_prediction=False)
+        # testers.append(tester)
 
         # Optimizer ###################################
         base_lr = config.lr
@@ -178,28 +177,28 @@ def main():
 
 
     # Cityscapes ###########################################
-    if config.is_eval:
-        logging.info(config.load_path)
-        logging.info(config.eval_path)
-        logging.info(config.save)
-        with torch.no_grad():
-            if config.is_test:
-                # test
-                print("[test...]")
-                with torch.no_grad():
-                    test(0, models, testers, logger)
-            else:
-                # validation
-                print("[validation...]")
-                valid_mIoUs = infer(models, evaluators, logger)
-                for idx, arch_idx in enumerate(config.arch_idx):
-                    if arch_idx == 0:
-                        logger.add_scalar("mIoU/val_teacher", valid_mIoUs[idx], 0)
-                        logging.info("teacher's valid_mIoU %.3f"%(valid_mIoUs[idx]))
-                    else:
-                        logger.add_scalar("mIoU/val_student", valid_mIoUs[idx], 0)
-                        logging.info("student's valid_mIoU %.3f"%(valid_mIoUs[idx]))
-        exit(0)
+    # if config.is_eval:
+    #     logging.info(config.load_path)
+    #     logging.info(config.eval_path)
+    #     logging.info(config.save)
+    #     with torch.no_grad():
+    #         if config.is_test:
+    #             # test
+    #             print("[test...]")
+    #             with torch.no_grad():
+    #                 test(0, models, testers, logger)
+    #         else:
+    #             # validation
+    #             print("[validation...]")
+    #             valid_mIoUs = infer(models, evaluators, logger)
+    #             for idx, arch_idx in enumerate(config.arch_idx):
+    #                 if arch_idx == 0:
+    #                     logger.add_scalar("mIoU/val_teacher", valid_mIoUs[idx], 0)
+    #                     logging.info("teacher's valid_mIoU %.3f"%(valid_mIoUs[idx]))
+    #                 else:
+    #                     logger.add_scalar("mIoU/val_student", valid_mIoUs[idx], 0)
+    #                     logging.info("student's valid_mIoU %.3f"%(valid_mIoUs[idx]))
+    #     exit(0)
 
     tbar = tqdm(range(config.nepochs), ncols=80)
     for epoch in tbar:
@@ -208,12 +207,12 @@ def main():
         logging.info("lr: " + str(optimizer.param_groups[0]['lr']))
         # training
         tbar.set_description("[Epoch %d/%d][train...]" % (epoch + 1, config.nepochs))
-        train_mIoUs = train(train_loader, models, ohem_criterion, distill_criterion, optimizer, logger, epoch)
+        train_Accs = train(train_loader, models, criterion, optimizer, logger, epoch)
         torch.cuda.empty_cache()
         for idx, arch_idx in enumerate(config.arch_idx):
             if arch_idx == 0:
-                logger.add_scalar("mIoU/train_teacher", train_mIoUs[idx], epoch)
-                logging.info("teacher's train_mIoU %.3f"%(train_mIoUs[idx]))
+                logger.add_scalar("Acc/train_teacher", train_Accs[idx], epoch)
+                logging.info("teacher's train_Acc %.3f"%(train_Accs[idx]))
             else:
                 logger.add_scalar("mIoU/train_student", train_mIoUs[idx], epoch)
                 logging.info("student's train_mIoU %.3f"%(train_mIoUs[idx]))
@@ -242,7 +241,7 @@ def main():
             save(models[idx], os.path.join(config.save, "weights%d.pt"%arch_idx))
 
 
-def train(train_loader, models, criterion, distill_criterion, optimizer, logger, epoch):
+def train(train_loader, models, criterion, optimizer, logger, epoch):
     if len(models) == 1:
         # train teacher solo
         models[0].train()
@@ -255,20 +254,24 @@ def train(train_loader, models, criterion, distill_criterion, optimizer, logger,
     pbar = tqdm(range(config.niters_per_epoch), file=sys.stdout, bar_format=bar_format, ncols=80)
     dataloader = iter(train_loader)
 
-    metrics = [ seg_metrics.Seg_Metrics(n_classes=config.num_classes) for _ in range(len(models)) ]
+    metrics = [ seg_metrics.Cls_Metrics(n_classes=config.num_classes) for _ in range(len(models)) ]
     lamb = 0.2
     for step in pbar:
         optimizer.zero_grad()
 
         minibatch = dataloader.next()
-        imgs = minibatch['data']
-        target = minibatch['label']
+        imgs = minibatch[0]
+        target = minibatch[1]
+        target_en = torch.Tensor(target.shape[0], config.num_classes)
+        target_en.zero_()
+        target_en.scatter_(1, target.view(-1, 1), 1)  # one-hot encoding
+        target_en = target_en.cuda(non_blocking=True)
         imgs = imgs.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 
         logits_list = []
-        loss = 0
-        loss_kl = 0
+        ce_loss = 0
+        re_loss = 0
         description = ""
         for idx, arch_idx in enumerate(config.arch_idx):
             model = models[idx]
@@ -277,20 +280,23 @@ def train(train_loader, models, criterion, distill_criterion, optimizer, logger,
                     logits8 = model(imgs)
                     logits_list.append(logits8)
             else:
-                logits8, logits16, logits32 = model(imgs)
-                logits_list.append(logits8)
-                loss = loss + criterion(logits8, target)
-                loss = loss + lamb * criterion(logits16, target)
-                loss = loss + lamb * criterion(logits32, target)
-                if len(logits_list) > 1:
-                    loss = loss + distill_criterion(F.softmax(logits_list[1], dim=1).log(), F.softmax(logits_list[0], dim=1))
+                logits8, logits16, logits32, reconstructed = model(imgs)
+                # logits_list.append(logits8)
+                ce_loss = ce_loss + criterion(logits32, target)
+                ce_loss = ce_loss + lamb * criterion(logits16, target)
+                ce_loss = ce_loss + lamb * criterion(logits8, target)
+                re_loss = re_loss + reconstruction_function(reconstructed, imgs)
+                # if len(logits_list) > 1:
+                #     loss = loss + distill_criterion(F.softmax(logits_list[1], dim=1).log(), F.softmax(logits_list[0], dim=1))
 
-            metrics[idx].update(logits8.data, target)
-            description += "[mIoU%d: %.3f]"%(arch_idx, metrics[idx].get_scores())
+            metrics[idx].update(logits8.data, logits16.data, logits16.data, target)
+            description += "[Acc%d: %.3f]"%(arch_idx, metrics[idx].get_scores())
 
         pbar.set_description("[Step %d/%d]"%(step + 1, len(train_loader)) + description)
-        logger.add_scalar('loss/train', loss+loss_kl, epoch*len(pbar)+step)
+        logger.add_scalar('train/ce_loss', ce_loss, epoch * len(pbar) + step)
+        logger.add_scalar('train/re_loss', re_loss, epoch * len(pbar) + step)
 
+        loss = ce_loss + re_loss
         loss.backward()
         optimizer.step()
 

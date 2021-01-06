@@ -99,7 +99,7 @@ if C.pretrain == True:
     C.nepochs = 50
     C.save = "pretrain-%dx%d_F%d.L%d_batch%d"%(C.image_height, C.image_width, C.Fch, C.layers, C.batch_size)
 else:
-    C.batch_size = 100
+    C.batch_size = 10000
     # C.niters_per_epoch = max(C.num_train_imgs // 2 // C.batch_size, 400)
     C.niters_per_epoch = C.num_train_imgs // 2 // C.batch_size
     C.latency_weight = [0, 1e-2,]

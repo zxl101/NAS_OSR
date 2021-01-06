@@ -19,12 +19,12 @@ from matplotlib import pyplot as plt
 from thop import profile
 
 from config_search import config
-from dataloader import get_train_loader
-from datasets import Cityscapes
+# from dataloader import get_train_loader
+# from datasets import Cityscapes
 
 from utils.init_func import init_weight
-from seg_opr.loss_opr import ProbOhemCrossEntropy2d
-from eval import SegEvaluator
+# from seg_opr.loss_opr import ProbOhemCrossEntropy2d
+# from eval import SegEvaluator
 
 from architect import Architect
 from utils.darts_utils import create_exp_dir, save, plot_op, plot_path_width, objective_acc_lat
@@ -34,7 +34,41 @@ from model_seg import Network_Multi_Path_Infer
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
+import argparse
+
+parser = argparse.ArgumentParser(description='PyTorch OSR Example')
+parser.add_argument('--batch_size', type=int, default=None, help='input batch size for training (default: 64)')
+parser.add_argument('--num_classes', type=int, default=None, help='number of classes')
+parser.add_argument('--nepochs', type=int, default=None, help='number of epochs to train (default: 50)')
+# parser.add_argument('--lr', type=float, default=0.001, help='learning rate (default: 1e-3)')
+# parser.add_argument('--wd', type=float, default=0.00, help='weight decay')
+# parser.add_argument('--momentum', type=float, default=0.01, help='momentum (default: 1e-3)')
+# parser.add_argument('--decreasing_lr', default='60,100,150', help='decreasing strategy')
+# parser.add_argument('--seed', type=int, default=117, help='random seed (default: 1)')
+# parser.add_argument('--log_interval', type=int, default=20,
+#                     help='how many batches to wait before logging training status')
+# parser.add_argument('--val_interval', type=int, default=5, help='how many epochs to wait before another val')
+# parser.add_argument('--test_interval', type=int, default=5, help='how many epochs to wait before another test')
+# parser.add_argument('--lamda', type=int, default=100, help='lamda in loss function')
+parser.add_argument('--wce', type=float, default=1)
+parser.add_argument('--wre', type=float, default=1)
+parser.add_argument('--wkl', type=float, default=1)
+args = parser.parse_args()
+
+
 def main(pretrain=True):
+
+    config.wce = args.wce
+    config.wre = args.wre
+    config.wkl = args.wkl
+    if args.batch_size != None:
+        config.batch_size = args.batch_size
+        config.niters_per_epoch = config.num_train_imgs // 2 // config.batch_size
+    if args.num_classes != None:
+        config.num_classes = args.num_classes
+    if args.nepochs != None:
+        config.nepochs = args.nepochs
+
     config.save = 'search-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"))
     create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
@@ -84,7 +118,7 @@ def main(pretrain=True):
 
     model = nn.DataParallel(model)
     model.to(device)
-    architect = Architect(model.module, config)
+    architect = Architect(model, config)
 
     # Optimizer ###################################
     base_lr = config.lr
@@ -317,7 +351,7 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
             loss_arch = architect.step(imgs, target, target_en, imgs_search, target_search, target_en_search)
             if (step+1) % 10 == 0:
                 logger.add_scalar('loss_arch/train', loss_arch, epoch*len(pbar)+step)
-                logger.add_scalar('arch/latency_supernet', architect.latency_supernet, epoch*len(pbar)+step)
+                # logger.add_scalar('arch/latency_supernet', architect.latency_supernet, epoch*len(pbar)+step)
 
         ce_loss, re_loss, kl_loss = model(imgs, target, target_en, pretrain)
         ce_loss = torch.mean(ce_loss)
