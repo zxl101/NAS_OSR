@@ -16,20 +16,20 @@ cfg = C
 C.seed = 12345
 
 """please config ROOT_dir and user when u first using"""
-C.repo_name = 'FasterSeg'
+C.repo_name = 'NAS_OSR'
 C.abs_dir = osp.realpath(".")
 C.this_dir = C.abs_dir.split(osp.sep)[-1]
 C.root_dir = C.abs_dir[:C.abs_dir.index(C.repo_name) + len(C.repo_name)]
 C.log_dir = osp.abspath(osp.join(C.root_dir, 'log', C.this_dir))
 
 """Data Dir"""
-C.dataset_path = "/ssd1/chenwy/cityscapes/"
-C.img_root_folder = C.dataset_path
-C.gt_root_folder = C.dataset_path
-C.train_source = osp.join(C.dataset_path, "cityscapes_train_fine.txt")
-C.train_eval_source = osp.join(C.dataset_path, "cityscapes_train_val_fine.txt")
-C.eval_source = osp.join(C.dataset_path, "cityscapes_val_fine.txt")
-C.test_source = osp.join(C.dataset_path, "cityscapes_test.txt")
+# C.dataset_path = "/ssd1/chenwy/cityscapes/"
+# C.img_root_folder = C.dataset_path
+# C.gt_root_folder = C.dataset_path
+# C.train_source = osp.join(C.dataset_path, "cityscapes_train_fine.txt")
+# C.train_eval_source = osp.join(C.dataset_path, "cityscapes_train_val_fine.txt")
+# C.eval_source = osp.join(C.dataset_path, "cityscapes_val_fine.txt")
+# C.test_source = osp.join(C.dataset_path, "cityscapes_test.txt")
 
 """Path Config"""
 def add_path(path):
@@ -74,16 +74,16 @@ C.eval_width = 2048 # real image width
 
 C.layers = 6 # layers (cells) for network
 """ Train Config """
-C.mode = "student" # "teacher" or "student"
+C.mode = "teacher" # "teacher" or "student"
 if C.mode == "teacher":
     ##### train teacher model only ####################################
     C.arch_idx = [0] # 0 for teacher
     C.branch = [3] # number of output branches
     C.width_mult_list = [4./12, 6./12, 8./12, 10./12, 1.,] # selection choices for channel pruning
     C.stem_head_width = [(1, 1)] # width ratio (#channel / Fch) for [teacher, student]
-    C.load_path = "fasterseg" # path to the searched directory
+    C.load_path = "search-2x2_F12.L6_batch100-20210105-163825" # path to the searched directory
     C.load_epoch = "last" # "last" or "int" (e.g. "30"): which epoch to load from the searched architecture
-    C.batch_size = 12
+    C.batch_size = 25
     C.Fch = 12 # base channel number
     C.image_height = 64 # crop size for training
     C.image_width = 64

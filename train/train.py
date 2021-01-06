@@ -121,7 +121,7 @@ def main():
             [state["alpha_%d_0"%arch_idx].detach(), state["alpha_%d_1"%arch_idx].detach(), state["alpha_%d_2"%arch_idx].detach()],
             [None, state["beta_%d_1"%arch_idx].detach(), state["beta_%d_2"%arch_idx].detach()],
             [state["ratio_%d_0"%arch_idx].detach(), state["ratio_%d_1"%arch_idx].detach(), state["ratio_%d_2"%arch_idx].detach()],
-            num_classes=config.num_classes, layers=config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list, stem_head_width=config.stem_head_width[idx], ignore_skip=arch_idx==0)
+            num_classes=config.num_classes, layers=config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list, stem_head_width=config.stem_head_width[idx])
 
         # mIoU02 = state["mIoU02"]; latency02 = state["latency02"]; obj02 = objective_acc_lat(mIoU02, latency02)
         # mIoU12 = state["mIoU12"]; latency12 = state["latency12"]; obj12 = objective_acc_lat(mIoU12, latency12)
@@ -138,8 +138,8 @@ def main():
                 plot_op(getattr(model, "ops%d"%b), getattr(model, "path%d"%b), F_base=config.Fch).savefig(os.path.join(config.save, "ops_%d_%d.png"%(arch_idx,b)), bbox_inches="tight")
         plot_path_width(model.lasts, model.paths, model.widths).savefig(os.path.join(config.save, "path_width%d.png"%arch_idx))
         plot_path_width([2, 1, 0], [model.path2, model.path1, model.path0], [model.widths2, model.widths1, model.widths0]).savefig(os.path.join(config.save, "path_width_all%d.png"%arch_idx))
-        flops, params = profile(model, inputs=(torch.randn(1, 3, 1024, 2048),), verbose=False)
-        logging.info("params = %fMB, FLOPs = %fGB", params / 1e6, flops / 1e9)
+        # flops, params = profile(model, inputs=(torch.randn(1, 3, 1024, 2048),), verbose=False)
+        # logging.info("params = %fMB, FLOPs = %fGB", params / 1e6, flops / 1e9)
         logging.info("ops:" + str(model.ops))
         logging.info("path:" + str(model.paths))
         logging.info("last:" + str(model.lasts))
@@ -211,8 +211,12 @@ def main():
         torch.cuda.empty_cache()
         for idx, arch_idx in enumerate(config.arch_idx):
             if arch_idx == 0:
-                logger.add_scalar("Acc/train_teacher", train_Accs[idx], epoch)
-                logging.info("teacher's train_Acc %.3f"%(train_Accs[idx]))
+                logger.add_scalar("Acc/train_8", train_Accs[idx][0], epoch)
+                logging.info("layer8 train_Acc %.3f"%(train_Accs[idx][0]))
+                logger.add_scalar("Acc/train_16", train_Accs[idx][1], epoch)
+                logging.info("layer16 train_Acc %.3f" % (train_Accs[idx][1]))
+                logger.add_scalar("Acc/train_32", train_Accs[idx][2], epoch)
+                logging.info("layer32 train_Acc %.3f" % (train_Accs[idx][2]))
             else:
                 logger.add_scalar("mIoU/train_student", train_mIoUs[idx], epoch)
                 logging.info("student's train_mIoU %.3f"%(train_mIoUs[idx]))
@@ -222,11 +226,15 @@ def main():
         if not config.is_test and ((epoch+1) % 10 == 0 or epoch == 0):
             tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
             with torch.no_grad():
-                valid_mIoUs = infer(models, evaluators, logger)
+                acc8, acc16, acc32 = infer(models[0], val_loader)
                 for idx, arch_idx in enumerate(config.arch_idx):
                     if arch_idx == 0:
-                        logger.add_scalar("mIoU/val_teacher", valid_mIoUs[idx], epoch)
-                        logging.info("teacher's valid_mIoU %.3f"%(valid_mIoUs[idx]))
+                        logger.add_scalar("Val_Acc/val_8", acc8, epoch)
+                        logging.info("layer8 val_Acc %.3f" % (acc8))
+                        logger.add_scalar("Val_Acc/val_16", acc16, epoch)
+                        logging.info("layer16 val_Acc %.3f" % (acc16))
+                        logger.add_scalar("Val_Acc/val_32", acc32, epoch)
+                        logging.info("layer32 val_Acc %.3f" % (acc32))
                     else:
                         logger.add_scalar("mIoU/val_student", valid_mIoUs[idx], epoch)
                         logging.info("student's valid_mIoU %.3f"%(valid_mIoUs[idx]))
@@ -290,7 +298,9 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
                 #     loss = loss + distill_criterion(F.softmax(logits_list[1], dim=1).log(), F.softmax(logits_list[0], dim=1))
 
             metrics[idx].update(logits8.data, logits16.data, logits16.data, target)
-            description += "[Acc%d: %.3f]"%(arch_idx, metrics[idx].get_scores())
+            description += "[Acc%d_8: %.3f]"%(arch_idx, metrics[idx].get_scores()[0])
+            description += "[Acc%d_16: %.3f]" % (arch_idx, metrics[idx].get_scores()[1])
+            description += "[Acc%d_32: %.3f]" % (arch_idx, metrics[idx].get_scores()[2])
 
         pbar.set_description("[Step %d/%d]"%(step + 1, len(train_loader)) + description)
         logger.add_scalar('train/ce_loss', ce_loss, epoch * len(pbar) + step)
@@ -303,14 +313,19 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
     return [ metric.get_scores() for metric in metrics ]
 
 
-def infer(models, evaluators, logger):
-    mIoUs = []
-    for model, evaluator in zip(models, evaluators):
-        model.eval()
-        # _, mIoU = evaluator.run_online()
-        _, mIoU = evaluator.run_online_multiprocess()
-        mIoUs.append(mIoU)
-    return mIoUs
+def infer(model, val_loader, device=torch.device("cuda")):
+    model.eval()
+    metrics = seg_metrics.Cls_Metrics()
+    for data_val, target_val in val_loader:
+        # print("Current working on {} batch".format(i))
+        target_val_en = torch.Tensor(target_val.shape[0], config.num_classes)
+        target_val_en.zero_()
+        target_val_en.scatter_(1, target_val.view(-1, 1), 1)  # one-hot encoding
+        target_val_en = target_val_en.to(device)
+        data_val, target_val = data_val.to(device), target_val.to(device)
+        logits8, logits16, logits32, reconstructed = model(data_val)
+        metrics.update(logits8, logits16, logits32, target_val)
+    return metrics.get_scores()
 
 def test(epoch, models, testers, logger):
     for idx, arch_idx in enumerate(config.arch_idx):

@@ -12,8 +12,10 @@ BatchNorm2d = nn.BatchNorm2d
 
 
 def sample_gaussian(m, v):
-    sample = torch.randn(m.shape).cuda()
+    sample = torch.randn(m.shape).to(torch.device("cuda"))
     # sample = torch.randn(m.shape)
+    m = m.cuda()
+    v = v.cuda()
     z = m + (v ** 0.5) * sample
     return z
 
@@ -286,7 +288,6 @@ class Network_Multi_Path_Infer(nn.Module):
         )
 
         self.refine32 = nn.ModuleList([
-            nn.ModuleList([
                 ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]),
                          kernel_size=1, bias=False,
                          groups=1, slimmable=False),
@@ -298,15 +299,14 @@ class Network_Multi_Path_Infer(nn.Module):
                          groups=1, slimmable=False),
                 ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
                          kernel_size=3, padding=1,
-                         bias=False, groups=1, slimmable=False)])])
+                         bias=False, groups=1, slimmable=False)])
         self.refine16 = nn.ModuleList([
-            nn.ModuleList([
                 ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
                          kernel_size=1, bias=False,
                          groups=1, slimmable=False),
                 ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
                          kernel_size=3, padding=1,
-                         bias=False, groups=1, slimmable=False)])])
+                         bias=False, groups=1, slimmable=False)])
         self.refine8 = nn.ModuleList([
             ConvNorm(self.num_filters(8, self._stem_head_width[1]), self.num_filters(4, self._stem_head_width[1]),
                      kernel_size=3,
@@ -462,14 +462,15 @@ class Network_Multi_Path_Infer(nn.Module):
         # yh8 = self.one_hot8(label_en)
 
         out32 = outputs32
+        # print(out32.shape)
         out16 = F.interpolate(self.refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
         out16 = self.refine32[1](torch.cat([out16, outputs16], dim=1))
         out8 = F.interpolate(self.refine16[0](out16), scale_factor=2, mode="bilinear", align_corners=True)
         out8 = self.refine16[1](torch.cat([out8, outputs8], dim=1))
-        out4 = F.interpolate(self.refine8(out8), scale_factor=2, mode="bilinear", align_corners=True)
-        out2 = F.interpolate(self.refine4(out4), scale_factor=2, mode="bilinear", align_corners=True)
-        out1 = F.interpolate(self.refine2(out2), scale_factor=2, mode="bilinear", align_corners=True)
-        reconstructed = self.reconstruct(self.refine1(out1))
+        out4 = F.interpolate(self.refine8[0](out8), scale_factor=2, mode="bilinear", align_corners=True)
+        out2 = F.interpolate(self.refine4[0](out4), scale_factor=2, mode="bilinear", align_corners=True)
+        out1 = F.interpolate(self.refine2[0](out2), scale_factor=2, mode="bilinear", align_corners=True)
+        reconstructed = self.reconstruct[0](self.refine1[0](out1))
 
         return predict32, predict16, predict8, reconstructed
         # if len(pred32) > 0:
@@ -521,6 +522,9 @@ class Network_Multi_Path_Infer(nn.Module):
         # else:
         #     pred8 = self.agg_ffm(outputs8, outputs16, outputs32)
         #     out = F.interpolate(pred8, size=(int(pred8.size(2))*8, int(pred8.size(3))*8), mode='bilinear', align_corners=True)
+        output8 = outputs8.cuda()
+        output16 = outputs16.cuda()
+        output32 = outputs32.cuda()
         pred8, pred16, pred32, reconstructed = self.agg_ffm(outputs8, outputs16, outputs32)
         return pred8, pred16, pred32, reconstructed
 
