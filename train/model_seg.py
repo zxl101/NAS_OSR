@@ -326,6 +326,10 @@ class Network_Multi_Path_Infer(nn.Module):
         self.reconstruct = nn.ModuleList([
             ConvNorm(self.num_filters(1, self._stem_head_width[1]), 3, kernel_size=3,
                      padding=1, bias=False, groups=1, slimmable=False)])
+
+        self.fc1 = nn.Linear(30, 100)
+        self.fc2 = nn.Linear(100, 50)
+        self.fc3 = nn.Linear(50,10)
         # if 2 in self.lasts:
         #     self.arms32 = nn.ModuleList([
         #         ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]), 1, 1, 0, slimmable=False),
@@ -472,7 +476,10 @@ class Network_Multi_Path_Infer(nn.Module):
         out1 = F.interpolate(self.refine2[0](out2), scale_factor=2, mode="bilinear", align_corners=True)
         reconstructed = self.reconstruct[0](self.refine1[0](out1))
 
-        return predict32, predict16, predict8, reconstructed
+
+        pred_final = F.log_softmax(self.fc3(self.fc2(self.fc1(torch.cat((predict8,predict16,predict32),dim=1)))),dim=1)
+
+        return predict32, predict16, predict8, pred_final, reconstructed
         # if len(pred32) > 0:
         #     pred32 = self.heads32(torch.cat(pred32, dim=1))
         # else:
@@ -525,8 +532,8 @@ class Network_Multi_Path_Infer(nn.Module):
         output8 = outputs8.cuda()
         output16 = outputs16.cuda()
         output32 = outputs32.cuda()
-        pred8, pred16, pred32, reconstructed = self.agg_ffm(outputs8, outputs16, outputs32)
-        return pred8, pred16, pred32, reconstructed
+        pred8, pred16, pred32, pred_final, reconstructed = self.agg_ffm(outputs8, outputs16, outputs32)
+        return pred8, pred16, pred32, pred_final, reconstructed
 
     def forward_latency(self, size):
         _, H, W = size

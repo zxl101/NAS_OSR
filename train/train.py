@@ -64,7 +64,7 @@ def main():
         torch.cuda.manual_seed(seed)
 
     # config network and criterion ################
-    min_kept = int(config.batch_size * config.image_height * config.image_width // (16 * config.gt_down_sampling ** 2))
+    # min_kept = int(config.batch_size * config.image_height * config.image_width // (16 * config.gt_down_sampling ** 2))
     # criterion = ProbOhemCrossEntropy2d(ignore_label=255, thresh=0.7, min_kept=min_kept, use_weight=False)
     # distill_criterion = nn.KLDivLoss()
     criterion = nn.NLLLoss()
@@ -143,8 +143,10 @@ def main():
         logging.info("ops:" + str(model.ops))
         logging.info("path:" + str(model.paths))
         logging.info("last:" + str(model.lasts))
+        model = nn.DataParallel(model)
         model = model.cuda()
-        init_weight(model, nn.init.kaiming_normal_, torch.nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
+
+        init_weight(model.module, nn.init.kaiming_normal_, torch.nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
 
         if arch_idx == 0 and len(config.arch_idx) > 1:
             partial = torch.load(os.path.join(config.teacher_path, "weights%d.pt"%arch_idx))
@@ -154,10 +156,10 @@ def main():
             model.load_state_dict(state)
         elif config.is_eval:
             partial = torch.load(os.path.join(config.eval_path, "weights%d.pt"%arch_idx))
-            state = model.state_dict()
+            state = model.module.state_dict()
             pretrained_dict = {k: v for k, v in partial.items() if k in state}
             state.update(pretrained_dict)
-            model.load_state_dict(state)
+            model.module.load_state_dict(state)
 
         # evaluator = SegEvaluator(Cityscapes(data_setting, 'val', None), config.num_classes, config.image_mean,
         #                          config.image_std, model, config.eval_scale_array, config.eval_flip, 0, out_idx=0, config=config,
@@ -172,7 +174,7 @@ def main():
         base_lr = config.lr
         if arch_idx == 1 or len(config.arch_idx) == 1:
             # optimize teacher solo OR student (w. distill from teacher)
-            optimizer = torch.optim.SGD(model.parameters(), lr=base_lr, momentum=config.momentum, weight_decay=config.weight_decay)
+            optimizer = torch.optim.SGD(model.module.parameters(), lr=base_lr, momentum=config.momentum, weight_decay=config.weight_decay)
         models.append(model)
 
 
@@ -226,7 +228,7 @@ def main():
         if not config.is_test and ((epoch+1) % 10 == 0 or epoch == 0):
             tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
             with torch.no_grad():
-                acc8, acc16, acc32 = infer(models[0], val_loader)
+                acc8, acc16, acc32, acc_final = infer(models[0], val_loader)
                 for idx, arch_idx in enumerate(config.arch_idx):
                     if arch_idx == 0:
                         logger.add_scalar("Val_Acc/val_8", acc8, epoch)
@@ -235,6 +237,8 @@ def main():
                         logging.info("layer16 val_Acc %.3f" % (acc16))
                         logger.add_scalar("Val_Acc/val_32", acc32, epoch)
                         logging.info("layer32 val_Acc %.3f" % (acc32))
+                        logger.add_scalar("Val_Acc/val_final", acc_final, epoch)
+                        logging.info("final val_Acc %.3f" % (acc_final))
                     else:
                         logger.add_scalar("mIoU/val_student", valid_mIoUs[idx], epoch)
                         logging.info("student's valid_mIoU %.3f"%(valid_mIoUs[idx]))
@@ -288,19 +292,21 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
                     logits8 = model(imgs)
                     logits_list.append(logits8)
             else:
-                logits8, logits16, logits32, reconstructed = model(imgs)
+                logits8, logits16, logits32, logits_final, reconstructed = model(imgs)
                 # logits_list.append(logits8)
-                ce_loss = ce_loss + criterion(logits32, target)
+                ce_loss = ce_loss + 2 * lamb * criterion(logits32, target)
                 ce_loss = ce_loss + lamb * criterion(logits16, target)
                 ce_loss = ce_loss + lamb * criterion(logits8, target)
+                ce_loss = ce_loss + criterion(logits_final, target)
                 re_loss = re_loss + reconstruction_function(reconstructed, imgs)
                 # if len(logits_list) > 1:
                 #     loss = loss + distill_criterion(F.softmax(logits_list[1], dim=1).log(), F.softmax(logits_list[0], dim=1))
 
-            metrics[idx].update(logits8.data, logits16.data, logits16.data, target)
+            metrics[idx].update(logits8.data, logits16.data, logits32.data, logits_final.data, target)
             description += "[Acc%d_8: %.3f]"%(arch_idx, metrics[idx].get_scores()[0])
             description += "[Acc%d_16: %.3f]" % (arch_idx, metrics[idx].get_scores()[1])
             description += "[Acc%d_32: %.3f]" % (arch_idx, metrics[idx].get_scores()[2])
+            description += "[Acc%d_final: %.3f]" % (arch_idx, metrics[idx].get_scores()[3])
 
         pbar.set_description("[Step %d/%d]"%(step + 1, len(train_loader)) + description)
         logger.add_scalar('train/ce_loss', ce_loss, epoch * len(pbar) + step)
@@ -323,8 +329,8 @@ def infer(model, val_loader, device=torch.device("cuda")):
         target_val_en.scatter_(1, target_val.view(-1, 1), 1)  # one-hot encoding
         target_val_en = target_val_en.to(device)
         data_val, target_val = data_val.to(device), target_val.to(device)
-        logits8, logits16, logits32, reconstructed = model(data_val)
-        metrics.update(logits8, logits16, logits32, target_val)
+        logits8, logits16, logits32, logit_final, reconstructed = model(data_val)
+        metrics.update(logits8, logits16, logits32, logit_final, target_val)
     return metrics.get_scores()
 
 def test(epoch, models, testers, logger):
