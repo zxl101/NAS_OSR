@@ -697,7 +697,9 @@ class Network_Multi_Path(nn.Module):
         # print("The kl divergence loss is: {}".format(beta * kl_loss))
         # loss = torch.mean(theta * re_loss + lamda * ce_loss + beta * kl_loss)
         # loss = ce_loss
-        return ce_loss, re_loss, torch.mean(kl_loss)
+        self.prun_mode = "max"
+        _, _, yh, _, _ = self._forward(input, target, target_de)
+        return ce_loss, re_loss, torch.mean(kl_loss), yh
 
     def _build_arch_parameters(self, idx):
         num_ops = len(PRIMITIVES)

@@ -42,13 +42,13 @@ add_path(osp.join(C.root_dir, 'tools'))
 """Image Config"""
 C.num_classes = 10
 C.in_channel = 3
-C.background = -1
-C.image_mean = np.array([0.485, 0.456, 0.406])
-C.image_std = np.array([0.229, 0.224, 0.225])
-C.down_sampling = 2 # use downsampled images during search. In dataloader the image will first be down_sampled then cropped
-C.image_height = 64 # crop height after down_sampling in dataloader
-C.image_width = 64 # crop width after down_sampling in dataloader
-C.gt_down_sampling = 8 # model's default output size without final upsampling
+# C.background = -1
+# C.image_mean = np.array([0.485, 0.456, 0.406])
+# C.image_std = np.array([0.229, 0.224, 0.225])
+# C.down_sampling = 2 # use downsampled images during search. In dataloader the image will first be down_sampled then cropped
+# C.image_height = 64 # crop height after down_sampling in dataloader
+# C.image_width = 64 # crop width after down_sampling in dataloader
+# C.gt_down_sampling = 8 # model's default output size without final upsampling
 C.num_train_imgs = 50000 # number of training images
 C.num_eval_imgs = 10000 # number of validation images
 
@@ -87,11 +87,12 @@ C.prun_modes = ['arch_ratio',]
 C.Fch = 12 # base channel number
 C.width_mult_list = [4./12, 6./12, 8./12, 10./12, 1.] # selection choices for channel pruning
 C.stem_head_width = [(1, 1), (8./12, 8./12),] # width ratio (#channel / Fch) for [teacher, student]
-C.FPS_min = [0, 155.] # minimum FPS required for [teacher, student]
-C.FPS_max = [0, 175.] # maximum FPS allowed for [teacher, student]
+# C.FPS_min = [0, 155.] # minimum FPS required for [teacher, student]
+# C.FPS_max = [0, 175.] # maximum FPS allowed for [teacher, student]
 if C.pretrain == True:
     C.batch_size = 100
-    C.niters_per_epoch = max(C.num_train_imgs // 2 // C.batch_size, 400)
+    # C.niters_per_epoch = max(C.num_train_imgs // 2 // C.batch_size, 400)
+    C.niters_per_epoch = C.num_train_imgs // 2 // C.batch_size
     C.lr = 2e-3
     C.latency_weight = [0, 0] # weight of latency penalty loss
     C.image_height =2 # this size is after down_sampling

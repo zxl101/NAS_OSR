@@ -239,7 +239,7 @@ def main(pretrain=True):
                 logging.info("Epoch %d: valid_kl_loss_min %.3f" % (epoch, kl_loss))
                 if len(model.module._width_mult_list) > 1:
                     model.module.prun_mode = "max"
-                    ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config)
+                    ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config, add_scalar=True)
                     logger.add_scalar('ce_loss/val_max', ce_loss, epoch)
                     logger.add_scalar('re_loss/val_max', re_loss, epoch)
                     logger.add_scalar('kl_loss/val_max', kl_loss, epoch)
@@ -327,6 +327,10 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
     epoch_re_loss = 0
     epoch_kl_loss = 0
     count = 0
+    c8 = 0
+    c16 = 0
+    c32 = 0
+    total = 0
     for step in pbar:
         optimizer.zero_grad()
 
@@ -358,7 +362,12 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
                 logger.add_scalar('loss_arch/train', loss_arch, epoch*len(pbar)+step)
                 # logger.add_scalar('arch/latency_supernet', architect.latency_supernet, epoch*len(pbar)+step)
 
-        ce_loss, re_loss, kl_loss = model(imgs, target, target_en, pretrain)
+        ce_loss, re_loss, kl_loss, preds = model(imgs, target, target_en, pretrain)
+        c, batch_count = cal_acc(preds, target)
+        c8 += c[2]
+        c16 += c[1]
+        c32 += c[0]
+        total += batch_count
         ce_loss = torch.mean(ce_loss)
         re_loss = torch.mean(re_loss)
         kl_loss = torch.mean(kl_loss)
@@ -381,16 +390,24 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
     logger.add_scalar('loss_epoch/train_ce', epoch_ce_loss/count, epoch)
     logger.add_scalar('loss_epoch/train_re', epoch_re_loss / count, epoch)
     logger.add_scalar('loss_epoch/train_kl', epoch_kl_loss / count, epoch)
+    logger.add_scalar('train_acc/acc8', c8 / total, epoch)
+    logger.add_scalar('train_acc/acc16', c16 / total, epoch)
+    logger.add_scalar('train_acc/acc32', c32 / total, epoch)
     print("The training loss of this epoch is: {}".format((epoch_ce_loss+epoch_re_loss+kl_loss)/count))
+    print("The average training accuracy of this epoch is: {}".format( (c8+c16+c32) / total/3))
     torch.cuda.empty_cache()
     # del loss
     # if update_arch: del loss_arch
 
-def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.device("cuda")):
+def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.device("cuda"), add_scalar = False):
     model.eval()
     total_ce_loss = 0
     total_re_loss = 0
     total_kl_loss = 0
+    c8 = 0
+    c16 = 0
+    c32 = 0
+    total = 0
     i = 0
     for data_val, target_val in val_loader:
         # print("Current working on {} batch".format(i))
@@ -399,7 +416,12 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         target_val_en.scatter_(1, target_val.view(-1, 1), 1)  # one-hot encoding
         target_val_en = target_val_en.to(device)
         data_val, target_val = data_val.to(device), target_val.to(device)
-        ce_loss, re_loss, kl_loss = model(data_val, target_val, target_val_en)
+        ce_loss, re_loss, kl_loss, preds = model(data_val, target_val, target_val_en)
+        c, batch_count = cal_acc(preds, target_val)
+        c8 += c[2]
+        c16 += c[1]
+        c32 += c[0]
+        total += batch_count
         ce_loss = torch.mean(ce_loss)
         re_loss = torch.mean(re_loss)
         kl_loss = torch.mean(kl_loss)
@@ -415,6 +437,13 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
     print("The validation ce loss is: {}".format(total_ce_loss))
     print("The validation re loss is: {}".format(total_re_loss))
     print("The validation kl loss is: {}".format(total_kl_loss))
+    if add_scalar == True:
+        logger.add_scalar('val_acc/acc8', c8 / total, epoch)
+        logger.add_scalar('val_acc/acc16', c16 / total, epoch)
+        logger.add_scalar('val_acc/acc32', c32 / total, epoch)
+        print("The average validation accuracy of this epoch is: {}".format((c8 + c16 + c32) / total / 3))
+
+
     # if FPS:
     #     fps0, fps1 = arch_logging(model, config, logger, epoch)
     #     return total_ce_loss, fps0, fps1
@@ -477,6 +506,15 @@ def arch_logging(model, args, logger, epoch):
 
     # return 1000./latency0, 1000./latency1, 1000./latency2
     return 1000./latency2
+
+def cal_acc(preds, target):
+    c = [0, 0, 0]
+    i = 0
+    for pred in preds:
+        pred = pred.data.max(1)[1]
+        c[i] += pred.eq(target.view_as(pred)).sum().item()
+        i += 1
+    return c, len(target)
 
 if __name__ == '__main__':
     main(pretrain=config.pretrain) 
