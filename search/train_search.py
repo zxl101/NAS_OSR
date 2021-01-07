@@ -434,9 +434,9 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         ce_loss = torch.mean(ce_loss)
         re_loss = torch.mean(re_loss)
         kl_loss = torch.mean(kl_loss)
-        total_ce_loss += ce_loss
-        total_re_loss += re_loss
-        total_kl_loss += kl_loss
+        total_ce_loss += config.wce * ce_loss
+        total_re_loss += config.wre * re_loss
+        total_kl_loss += config.wkl * kl_loss
         i += 1
         # print(c_loss)
         # break
