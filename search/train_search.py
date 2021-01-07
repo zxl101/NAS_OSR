@@ -40,7 +40,8 @@ parser = argparse.ArgumentParser(description='PyTorch OSR Example')
 parser.add_argument('--batch_size', type=int, default=None, help='input batch size for training (default: 64)')
 parser.add_argument('--num_classes', type=int, default=None, help='number of classes')
 parser.add_argument('--nepochs', type=int, default=None, help='number of epochs to train (default: 50)')
-# parser.add_argument('--lr', type=float, default=0.001, help='learning rate (default: 1e-3)')
+parser.add_argument('--lr', type=float, default=None, help='learning rate (default: 1e-3)')
+parser.add_argument('--layers', type=int, default=None)
 # parser.add_argument('--wd', type=float, default=0.00, help='weight decay')
 # parser.add_argument('--momentum', type=float, default=0.01, help='momentum (default: 1e-3)')
 # parser.add_argument('--decreasing_lr', default='60,100,150', help='decreasing strategy')
@@ -68,6 +69,10 @@ def main(pretrain=True):
         config.num_classes = args.num_classes
     if args.nepochs != None:
         config.nepochs = args.nepochs
+    if args.lr != None:
+        config.lr = args.lr
+    if args.layers != None:
+        config.layers = args.layers
 
     config.save = 'search-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"))
     create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
@@ -94,7 +99,7 @@ def main(pretrain=True):
         torch.cuda.manual_seed(seed)
 
     # config network and criterion ################
-    min_kept = int(config.batch_size * config.image_height * config.image_width // (16 * config.gt_down_sampling ** 2))
+    # min_kept = int(config.batch_size * config.image_height * config.image_width // (16 * config.gt_down_sampling ** 2))
     # ohem_criterion = ProbOhemCrossEntropy2d(ignore_label=255, thresh=0.7, min_kept=min_kept, use_weight=False)
 
     # Model #######################################
