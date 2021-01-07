@@ -327,9 +327,9 @@ class Network_Multi_Path_Infer(nn.Module):
             ConvNorm(self.num_filters(1, self._stem_head_width[1]), 3, kernel_size=3,
                      padding=1, bias=False, groups=1, slimmable=False)])
 
-        self.fc1 = nn.Linear(30, 100)
-        self.fc2 = nn.Linear(100, 50)
-        self.fc3 = nn.Linear(50,10)
+        self.fc1 = nn.Linear(30, 30)
+        self.fc2 = nn.Linear(30, 15)
+        self.fc3 = nn.Linear(15,10)
         # if 2 in self.lasts:
         #     self.arms32 = nn.ModuleList([
         #         ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]), 1, 1, 0, slimmable=False),
@@ -412,7 +412,7 @@ class Network_Multi_Path_Infer(nn.Module):
             groups_all.append(branch_groups)
         return groups_all, cells
 
-    def agg_ffm(self, outputs8, outputs16, outputs32):
+    def agg_ffm(self, outputs8, outputs16, outputs32, label_en):
         # pred32 = []; pred16 = []; pred8 = [] # order of predictions is not important
         for branch in range(self._branch):
             last = self.lasts[branch]
@@ -443,7 +443,7 @@ class Network_Multi_Path_Infer(nn.Module):
         predict32 = F.log_softmax(self.classifier32(latent32), dim=1)
         # print(predict)
         # predict_test32 = F.log_softmax(self.classifier32(latent_mu), dim=1)
-        # yh32 = self.one_hot32(label_en)
+        yh32 = self.one_hot32(label_en)
 
         out_flat16 = outputs16.view(-1, int(192 * 4 * 4))
         latent_mu16, latent_var16 = self.mean_layer16(out_flat16), self.var_layer16(out_flat16)
@@ -453,7 +453,7 @@ class Network_Multi_Path_Infer(nn.Module):
         predict16 = F.log_softmax(self.classifier16(latent16), dim=1)
         # print(predict)
         # predict_test16 = F.log_softmax(self.classifier16(latent_mu), dim=1)
-        # yh16 = self.one_hot16(label_en)
+        yh16 = self.one_hot16(label_en)
 
         out_flat8 = outputs8.view(-1, int(96 * 8 * 8))
         latent_mu8, latent_var8 = self.mean_layer8(out_flat8), self.var_layer8(out_flat8)
@@ -463,7 +463,7 @@ class Network_Multi_Path_Infer(nn.Module):
         predict8 = F.log_softmax(self.classifier8(latent8), dim=1)
         # print(predict)
         # predict_test8 = F.log_softmax(self.classifier8(latent_mu), dim=1)
-        # yh8 = self.one_hot8(label_en)
+        yh8 = self.one_hot8(label_en)
 
         out32 = outputs32
         # print(out32.shape)
@@ -479,7 +479,8 @@ class Network_Multi_Path_Infer(nn.Module):
 
         pred_final = F.log_softmax(self.fc3(self.fc2(self.fc1(torch.cat((predict8,predict16,predict32),dim=1)))),dim=1)
 
-        return predict32, predict16, predict8, pred_final, reconstructed
+        return predict32, predict16, predict8, pred_final, reconstructed, \
+               [latent_mu32, latent_mu16, latent_mu8], [latent_var32, latent_var16, latent_var8], [yh32, yh16, yh8]
         # if len(pred32) > 0:
         #     pred32 = self.heads32(torch.cat(pred32, dim=1))
         # else:
@@ -494,7 +495,7 @@ class Network_Multi_Path_Infer(nn.Module):
         # else:
         #     return pred8
 
-    def forward(self, input):
+    def forward(self, input, label_en):
         _, _, H, W = input.size()
         stem = self.stem(input)
 
@@ -532,8 +533,9 @@ class Network_Multi_Path_Infer(nn.Module):
         output8 = outputs8.cuda()
         output16 = outputs16.cuda()
         output32 = outputs32.cuda()
-        pred8, pred16, pred32, pred_final, reconstructed = self.agg_ffm(outputs8, outputs16, outputs32)
-        return pred8, pred16, pred32, pred_final, reconstructed
+        pred8, pred16, pred32, pred_final, reconstructed,\
+            latent_mu, latent_var, yh = self.agg_ffm(outputs8, outputs16, outputs32, label_en)
+        return pred8, pred16, pred32, pred_final, reconstructed, latent_mu, latent_var, yh
 
     def forward_latency(self, size):
         _, H, W = size

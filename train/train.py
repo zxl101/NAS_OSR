@@ -35,8 +35,17 @@ import seg_metrics
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
+import argparse
+
 reconstruction_function = nn.MSELoss()
 reconstruction_function.size_average = False
+criterion = nn.NLLLoss()
+
+def kl_normal(qm, qv, pm, pv, yh):
+	element_wise = 0.5 * (torch.log(pv) - torch.log(qv) + qv / pv + (qm - pm - yh).pow(2) / pv - 1)
+	kl = element_wise.sum(-1)
+	#print("log var1", qv)
+	return torch.mean(kl)
 
 
 def adjust_learning_rate(base_lr, power, optimizer, epoch, total_epoch):
@@ -44,7 +53,35 @@ def adjust_learning_rate(base_lr, power, optimizer, epoch, total_epoch):
         param_group['lr'] = param_group['lr'] * power
 
 
+
+parser = argparse.ArgumentParser(description='PyTorch OSR Example')
+parser.add_argument('--batch_size', type=int, default=None, help='input batch size for training (default: 64)')
+parser.add_argument('--num_classes', type=int, default=None, help='number of classes')
+parser.add_argument('--nepochs', type=int, default=None, help='number of epochs to train (default: 50)')
+parser.add_argument('--lr', type=float, default=None, help='learning rate (default: 1e-3)')
+# parser.add_argument('--wd', type=float, default=0.00, help='weight decay')
+# parser.add_argument('--momentum', type=float, default=0.01, help='momentum (default: 1e-3)')
+# parser.add_argument('--decreasing_lr', default='60,100,150', help='decreasing strategy')
+# parser.add_argument('--seed', type=int, default=117, help='random seed (default: 1)')
+# parser.add_argument('--log_interval', type=int, default=20,
+#                     help='how many batches to wait before logging training status')
+# parser.add_argument('--val_interval', type=int, default=5, help='how many epochs to wait before another val')
+# parser.add_argument('--test_interval', type=int, default=5, help='how many epochs to wait before another test')
+# parser.add_argument('--lamda', type=int, default=100, help='lamda in loss function')
+parser.add_argument('--wce', type=float, default=1)
+parser.add_argument('--wre', type=float, default=1)
+parser.add_argument('--wkl', type=float, default=1)
+args = parser.parse_args()
+
+
 def main():
+    config.wce = args.wce
+    config.wre = args.wre
+    config.wkl = args.wkl
+
+    if args.lr != None:
+        config.lr = args.lr
+
     create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
 
@@ -219,6 +256,8 @@ def main():
                 logging.info("layer16 train_Acc %.3f" % (train_Accs[idx][1]))
                 logger.add_scalar("Acc/train_32", train_Accs[idx][2], epoch)
                 logging.info("layer32 train_Acc %.3f" % (train_Accs[idx][2]))
+                logger.add_scalar("Acc/train_final", train_Accs[idx][3], epoch)
+                logging.info("final train_Acc %.3f" % (train_Accs[idx][3]))
             else:
                 logger.add_scalar("mIoU/train_student", train_mIoUs[idx], epoch)
                 logging.info("student's train_mIoU %.3f"%(train_mIoUs[idx]))
@@ -228,7 +267,7 @@ def main():
         if not config.is_test and ((epoch+1) % 10 == 0 or epoch == 0):
             tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
             with torch.no_grad():
-                acc8, acc16, acc32, acc_final = infer(models[0], val_loader)
+                acc8, acc16, acc32, acc_final = infer(models[0], val_loader, epoch=epoch, logger=logger)
                 for idx, arch_idx in enumerate(config.arch_idx):
                     if arch_idx == 0:
                         logger.add_scalar("Val_Acc/val_8", acc8, epoch)
@@ -284,21 +323,26 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
         logits_list = []
         ce_loss = 0
         re_loss = 0
+        kl_loss = 0
         description = ""
         for idx, arch_idx in enumerate(config.arch_idx):
             model = models[idx]
             if arch_idx == 0 and len(models) > 1:
                 with torch.no_grad():
-                    logits8 = model(imgs)
+                    logits8 = model(imgs, target_en)
                     logits_list.append(logits8)
             else:
-                logits8, logits16, logits32, logits_final, reconstructed = model(imgs)
+                logits8, logits16, logits32, logits_final, reconstructed,\
+                    latent_mu, latent_var, yh = model(imgs, target_en)
                 # logits_list.append(logits8)
                 ce_loss = ce_loss + 2 * lamb * criterion(logits32, target)
                 ce_loss = ce_loss + lamb * criterion(logits16, target)
                 ce_loss = ce_loss + lamb * criterion(logits8, target)
                 ce_loss = ce_loss + criterion(logits_final, target)
                 re_loss = re_loss + reconstruction_function(reconstructed, imgs)
+                for i in range(3):
+                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
                 # if len(logits_list) > 1:
                 #     loss = loss + distill_criterion(F.softmax(logits_list[1], dim=1).log(), F.softmax(logits_list[0], dim=1))
 
@@ -311,26 +355,48 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
         pbar.set_description("[Step %d/%d]"%(step + 1, len(train_loader)) + description)
         logger.add_scalar('train/ce_loss', ce_loss, epoch * len(pbar) + step)
         logger.add_scalar('train/re_loss', re_loss, epoch * len(pbar) + step)
+        logger.add_scalar('train/kl_loss', kl_loss, epoch * len(pbar) + step)
 
-        loss = ce_loss + re_loss
+        loss = config.wce * ce_loss + config.wre * re_loss + config.wkl * kl_loss
         loss.backward()
         optimizer.step()
 
     return [ metric.get_scores() for metric in metrics ]
 
 
-def infer(model, val_loader, device=torch.device("cuda")):
+def infer(model, val_loader, device=torch.device("cuda"), epoch= 0, logger = None):
     model.eval()
     metrics = seg_metrics.Cls_Metrics()
+    ce_loss = 0
+    re_loss = 0
+    kl_loss = 0
+    lamb = 0.2
+    total_num = 0
     for data_val, target_val in val_loader:
         # print("Current working on {} batch".format(i))
+        total_num += len(target_val)
         target_val_en = torch.Tensor(target_val.shape[0], config.num_classes)
         target_val_en.zero_()
         target_val_en.scatter_(1, target_val.view(-1, 1), 1)  # one-hot encoding
         target_val_en = target_val_en.to(device)
         data_val, target_val = data_val.to(device), target_val.to(device)
-        logits8, logits16, logits32, logit_final, reconstructed = model(data_val)
+        logits8, logits16, logits32, logit_final, reconstructed,\
+            latent_mu, latent_var, yh = model(data_val, target_val_en)
         metrics.update(logits8, logits16, logits32, logit_final, target_val)
+        ce_loss = ce_loss + 2 * lamb * criterion(logits32, target_val)
+        ce_loss = ce_loss + lamb * criterion(logits16, target_val)
+        ce_loss = ce_loss + lamb * criterion(logits8, target_val)
+        ce_loss = ce_loss + criterion(logit_final, target_val)
+        re_loss = re_loss + reconstruction_function(reconstructed, data_val)
+        for i in range(3):
+            pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+            kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+    ce_loss = ce_loss / total_num
+    re_loss =re_loss / total_num
+    kl_loss = kl_loss / total_num
+    logger.add_scalar('val/ce_loss', ce_loss, epoch)
+    logger.add_scalar('val/re_loss', re_loss, epoch)
+    logger.add_scalar('val/kl_loss', kl_loss, epoch)
     return metrics.get_scores()
 
 def test(epoch, models, testers, logger):

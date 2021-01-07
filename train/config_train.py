@@ -54,10 +54,10 @@ C.bn_eps = 1e-5 # a value added to the BN denominator for numerical stability
 C.bn_momentum = 0.1 # value used for the running_mean and running_var computation
 
 """Train Config"""
-C.lr = 0.0002 # learning rate for updating supernet weight (NOT arch params)
+C.lr = 0.00002 # learning rate for updating supernet weight (NOT arch params)
 C.momentum = 0.9 # SGD momentum
 C.weight_decay = 5e-4 # SGD weight decay
-C.nepochs = 600 # how many epochs to train
+C.nepochs = 150 # how many epochs to train
 C.niters_per_epoch = 1000 # how many batches per epoch
 C.num_workers = 6 # workers for dataloader
 C.train_scale_array = [0.75, 1, 1.25] # scale factors for augmentation during training
