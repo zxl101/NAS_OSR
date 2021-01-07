@@ -40,12 +40,12 @@ add_path(osp.join(C.root_dir, 'tools'))
 
 """Image Config"""
 C.num_classes = 10
-C.background = -1
-C.image_mean = np.array([0.485, 0.456, 0.406])
-C.image_std = np.array([0.229, 0.224, 0.225])
-C.target_size = 1024
-C.down_sampling = 1 # use downsampled images during search. In dataloader the image will first be down_sampled then cropped
-C.gt_down_sampling = 1 # model's default output size without final upsampling
+# C.background = -1
+# C.image_mean = np.array([0.485, 0.456, 0.406])
+# C.image_std = np.array([0.229, 0.224, 0.225])
+# C.target_size = 1024
+# C.down_sampling = 1 # use downsampled images during search. In dataloader the image will first be down_sampled then cropped
+# C.gt_down_sampling = 1 # model's default output size without final upsampling
 C.num_train_imgs = 50000 # number of training images
 C.num_eval_imgs = 10000 # number of validation images
 
@@ -54,7 +54,7 @@ C.bn_eps = 1e-5 # a value added to the BN denominator for numerical stability
 C.bn_momentum = 0.1 # value used for the running_mean and running_var computation
 
 """Train Config"""
-C.lr = 0.00002 # learning rate for updating supernet weight (NOT arch params)
+C.lr = 0.002 # learning rate for updating supernet weight (NOT arch params)
 C.momentum = 0.9 # SGD momentum
 C.weight_decay = 5e-4 # SGD weight decay
 C.nepochs = 150 # how many epochs to train
@@ -63,13 +63,13 @@ C.num_workers = 6 # workers for dataloader
 C.train_scale_array = [0.75, 1, 1.25] # scale factors for augmentation during training
 
 """Eval Config"""
-C.eval_stride_rate = 5 / 6 # stride for crop based evaluation. Not used in this repo
-C.eval_scale_array = [1, ] # multi-scale evaluation
-C.eval_flip = False # flipping for evaluation
-C.eval_base_size = 1024
-C.eval_crop_size = 1024
-C.eval_height = 1024 # real image height
-C.eval_width = 2048 # real image width
+# C.eval_stride_rate = 5 / 6 # stride for crop based evaluation. Not used in this repo
+# C.eval_scale_array = [1, ] # multi-scale evaluation
+# C.eval_flip = False # flipping for evaluation
+# C.eval_base_size = 1024
+# C.eval_crop_size = 1024
+# C.eval_height = 1024 # real image height
+# C.eval_width = 2048 # real image width
 
 
 C.layers = 6 # layers (cells) for network
