@@ -74,6 +74,15 @@ def main(pretrain=True):
     if args.layers != None:
         config.layers = args.layers
 
+    if config.pretrain == True:
+        config.save = "pretrain-%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d"%(config.image_height, config.image_width,
+                                                                      config.Fch, config.layers, config.batch_size,
+                                                                      config.wce,config.wre,config.wkl,config.lr)
+    else:
+        config.save = "%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d" % (config.image_height, config.image_width,
+                                                                        config.Fch, config.layers, config.batch_size,
+                                                                        config.wce, config.wre, config.wkl, config.lr)
+
     config.save = 'search-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"))
     create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)

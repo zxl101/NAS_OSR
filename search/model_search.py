@@ -262,9 +262,12 @@ class Network_Multi_Path(nn.Module):
             nn.ModuleList([
                 ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=1, bias=False, groups=1, slimmable=False),
                 ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=3, padding=1, bias=False, groups=1, slimmable=False)]) for _, head_ratio in self._stem_head_width ])
+        # self.refine8 = nn.ModuleList([
+        #         ConvNorm(self.num_filters(8, head_ratio), self.num_filters(4, head_ratio), kernel_size=3,
+        #                         padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
         self.refine8 = nn.ModuleList([
-                ConvNorm(self.num_filters(8, head_ratio), self.num_filters(4, head_ratio), kernel_size=3,
-                                padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
+            ConvNorm(self.num_filters(8, head_ratio) * 3, self.num_filters(4, head_ratio), kernel_size=3,
+                     padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
         self.refine4 = nn.ModuleList([
                 ConvNorm(self.num_filters(4, head_ratio), self.num_filters(2, head_ratio), kernel_size=3,
                                 padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
@@ -481,15 +484,30 @@ class Network_Multi_Path(nn.Module):
         # out2 = refine32[1](torch.cat([out2, out[1][0]], dim=1))
         # out2 = F.interpolate(refine32[2](out2), scale_factor=2, mode='bilinear', align_corners=True)
         # out2 = refine32[3](torch.cat([out2, out[0][0]], dim=1))
+
+        # concat adjacent layers to get final reconstructed image
+        # out32 = out[2][0]
+        # out16 = F.interpolate(refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
+        # out16 = refine32[1](torch.cat([out16, out[1][0]], dim=1))
+        # out8 = F.interpolate(refine16[0](out16), scale_factor=2, mode="bilinear", align_corners=True)
+        # out8 = refine16[1](torch.cat([out8, out[0][0]], dim=1))
+        # out4 = F.interpolate(refine8(out8), scale_factor=2, mode="bilinear", align_corners=True)
+        # out2 = F.interpolate(refine4(out4), scale_factor=2, mode="bilinear", align_corners=True)
+        # out1 = F.interpolate(refine2(out2), scale_factor=2, mode="bilinear", align_corners=True)
+        # reconstructed = reconstruct(refine1(out1))
+
+        # upsample each layer to downsample 8 and concat to get final reconstructed image
         out32 = out[2][0]
-        out16 = F.interpolate(refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
-        out16 = refine32[1](torch.cat([out16, out[1][0]], dim=1))
-        out8 = F.interpolate(refine16[0](out16), scale_factor=2, mode="bilinear", align_corners=True)
-        out8 = refine16[1](torch.cat([out8, out[0][0]], dim=1))
-        out4 = F.interpolate(refine8(out8), scale_factor=2, mode="bilinear", align_corners=True)
+        out32_16 = F.interpolate(refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
+        out32_8 = F.interpolate(refine32[2](out32_16), scale_factor=2, mode="bilinear", align_corners=True)
+        out16 = out[1][0]
+        out16_8 = F.interpolate(refine16[0](out16), scale_factor=2, mode="bilinear", align_corners=True)
+        out8 = out[0][0]
+        out4 = F.interpolate(refine8(torch.cat([out32_8, out16_8, out8], dim=1)), scale_factor=2, mode="bilinear", align_corners=True)
         out2 = F.interpolate(refine4(out4), scale_factor=2, mode="bilinear", align_corners=True)
         out1 = F.interpolate(refine2(out2), scale_factor=2, mode="bilinear", align_corners=True)
         reconstructed = reconstruct(refine1(out1))
+
 
         # out32 = out[2][0]
         # out32_16 = F.interpolate(refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
@@ -698,8 +716,8 @@ class Network_Multi_Path(nn.Module):
         # loss = torch.mean(theta * re_loss + lamda * ce_loss + beta * kl_loss)
         # loss = ce_loss
         self.prun_mode = "max"
-        _, _, yh, _, _ = self._forward(input, target, target_de)
-        return ce_loss, re_loss, torch.mean(kl_loss), yh
+        _, _, _, predict, _ = self._forward(input, target, target_de)
+        return ce_loss, re_loss, torch.mean(kl_loss), predict
 
     def _build_arch_parameters(self, idx):
         num_ops = len(PRIMITIVES)

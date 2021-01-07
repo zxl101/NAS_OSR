@@ -79,8 +79,8 @@ C.arch_weight_decay = 0
 C.layers = 6 # layers (cells) for supernet
 C.branch = 3 # number of output branches
 
-# C.pretrain = True
-C.pretrain = "search-pretrain-256x512_F12.L6_batch25-20201218-174809_ce_re_kl"
+C.pretrain = True
+# C.pretrain = "search-pretrain-256x512_F12.L6_batch25-20201218-174809_ce_re_kl"
 ########################################
 # C.prun_modes = ['max', 'arch_ratio',] # channel pruning mode for [teacher, student], i.e. by default teacher will use max channel number, and student will sample the channel number based on arch_ratio
 C.prun_modes = ['arch_ratio',]
@@ -90,7 +90,7 @@ C.stem_head_width = [(1, 1), (8./12, 8./12),] # width ratio (#channel / Fch) for
 # C.FPS_min = [0, 155.] # minimum FPS required for [teacher, student]
 # C.FPS_max = [0, 175.] # maximum FPS allowed for [teacher, student]
 if C.pretrain == True:
-    C.batch_size = 100
+    C.batch_size = 25
     # C.niters_per_epoch = max(C.num_train_imgs // 2 // C.batch_size, 400)
     C.niters_per_epoch = C.num_train_imgs // 2 // C.batch_size
     C.lr = 2e-3
@@ -100,7 +100,7 @@ if C.pretrain == True:
     C.nepochs = 50
     C.save = "pretrain-%dx%d_F%d.L%d_batch%d"%(C.image_height, C.image_width, C.Fch, C.layers, C.batch_size)
 else:
-    C.batch_size = 10000
+    C.batch_size = 25
     # C.niters_per_epoch = max(C.num_train_imgs // 2 // C.batch_size, 400)
     C.niters_per_epoch = C.num_train_imgs // 2 // C.batch_size
     C.latency_weight = [0, 1e-2,]
@@ -109,6 +109,6 @@ else:
     C.nepochs = 30
     C.save = "%dx%d_F%d.L%d_batch%d"%(C.image_height, C.image_width, C.Fch, C.layers, C.batch_size)
 ########################################
-assert len(C.latency_weight) == len(C.stem_head_width) and len(C.stem_head_width) == len(C.FPS_min) and len(C.FPS_min) == len(C.FPS_max)
+# assert len(C.latency_weight) == len(C.stem_head_width) and len(C.stem_head_width) == len(C.FPS_min) and len(C.FPS_min) == len(C.FPS_max)
 
 C.unrolled = False # for DARTS v2
