@@ -530,9 +530,9 @@ class Network_Multi_Path_Infer(nn.Module):
         # else:
         #     pred8 = self.agg_ffm(outputs8, outputs16, outputs32)
         #     out = F.interpolate(pred8, size=(int(pred8.size(2))*8, int(pred8.size(3))*8), mode='bilinear', align_corners=True)
-        output8 = outputs8.cuda()
-        output16 = outputs16.cuda()
-        output32 = outputs32.cuda()
+        outputs8 = outputs8.cuda()
+        outputs16 = outputs16.cuda()
+        outputs32 = outputs32.cuda()
         pred8, pred16, pred32, pred_final, reconstructed,\
             latent_mu, latent_var, yh = self.agg_ffm(outputs8, outputs16, outputs32, label_en)
         return pred8, pred16, pred32, pred_final, reconstructed, latent_mu, latent_var, yh
@@ -560,8 +560,8 @@ class Network_Multi_Path_Infer(nn.Module):
                 scale = int(H // size[1])
                 for branch in group:
                     outputs[branch] = size
-                    if scale == 4:
-                        outputs4[branch] = size
+                    if scale == 8:
+                        outputs8[branch] = size
                     elif scale == 16:
                         outputs16[branch] = size
                     elif scale == 32:

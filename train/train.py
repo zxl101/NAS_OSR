@@ -35,6 +35,8 @@ import seg_metrics
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
+import pickle
+
 import argparse
 
 reconstruction_function = nn.MSELoss()
@@ -124,22 +126,44 @@ def main():
     #
     # train_loader = get_train_loader(config, Cityscapes, test=config.is_test)
 
-    train_dataset = datasets.CIFAR10('data/cifar10', download=True, train=True,
-                                     transform=transforms.Compose([
-
-                                         transforms.ToTensor(),
-                                         transforms.Resize(64),
-                                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]))
-    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
-
-
-
-    val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,
+    train_dataset = datasets.MNIST('data/mnist', download=True, train=True,
                                    transform=transforms.Compose([
 
                                        transforms.ToTensor(),
                                        transforms.Resize(64),
-                                       transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]))
+                                       transforms.Normalize((0.1307,), (0.3081,)),
+                                   transforms.Lambda(lambda x: x.repeat(3, 1, 1) )]))
+
+
+    # train_dataset = datasets.CIFAR10('data/cifar10', download=True, train=True,
+    #                                  transform=transforms.Compose([
+    #
+    #                                      transforms.ToTensor(),
+    #                                      transforms.Resize(64),
+    #                                      transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
+
+
+
+    # val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,
+    #                                transform=transforms.Compose([
+    #
+    #                                    transforms.ToTensor(),
+    #                                    transforms.Resize(64),
+    #                                    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+    val_dataset = datasets.MNIST('data/mnist', download=False, train=False,
+                                  transform=transforms.Compose([
+
+                                      transforms.ToTensor(),
+                                      transforms.Resize(64),
+                                      transforms.Normalize((0.1307,), (0.3081,)),
+                                  transforms.Lambda(lambda x: x.repeat(3, 1, 1) )]))
+    # val_dataset = datasets.CIFAR100('data/cifar100', download=True, train=False,
+    #                                transform=transforms.Compose([
+    #
+    #                                    transforms.ToTensor(),
+    #                                    transforms.Resize(64),
+    #                                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]))
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
 
@@ -238,58 +262,65 @@ def main():
     #                     logger.add_scalar("mIoU/val_student", valid_mIoUs[idx], 0)
     #                     logging.info("student's valid_mIoU %.3f"%(valid_mIoUs[idx]))
     #     exit(0)
+    if config.is_train:
+        tbar = tqdm(range(config.nepochs), ncols=80)
+        for epoch in tbar:
+            logging.info(config.load_path)
+            logging.info(config.save)
+            logging.info("lr: " + str(optimizer.param_groups[0]['lr']))
+            # training
+            tbar.set_description("[Epoch %d/%d][train...]" % (epoch + 1, config.nepochs))
+            train_Accs = train(train_loader, models, criterion, optimizer, logger, epoch)
+            torch.cuda.empty_cache()
+            for idx, arch_idx in enumerate(config.arch_idx):
+                if arch_idx == 0:
+                    logger.add_scalar("Acc/train_8", train_Accs[idx][0], epoch)
+                    logging.info("layer8 train_Acc %.3f"%(train_Accs[idx][0]))
+                    logger.add_scalar("Acc/train_16", train_Accs[idx][1], epoch)
+                    logging.info("layer16 train_Acc %.3f" % (train_Accs[idx][1]))
+                    logger.add_scalar("Acc/train_32", train_Accs[idx][2], epoch)
+                    logging.info("layer32 train_Acc %.3f" % (train_Accs[idx][2]))
+                    logger.add_scalar("Acc/train_final", train_Accs[idx][3], epoch)
+                    logging.info("final train_Acc %.3f" % (train_Accs[idx][3]))
+                else:
+                    logger.add_scalar("mIoU/train_student", train_mIoUs[idx], epoch)
+                    logging.info("student's train_mIoU %.3f"%(train_mIoUs[idx]))
+            adjust_learning_rate(base_lr, 0.992, optimizer, epoch+1, config.nepochs)
 
-    tbar = tqdm(range(config.nepochs), ncols=80)
-    for epoch in tbar:
-        logging.info(config.load_path)
-        logging.info(config.save)
-        logging.info("lr: " + str(optimizer.param_groups[0]['lr']))
-        # training
-        tbar.set_description("[Epoch %d/%d][train...]" % (epoch + 1, config.nepochs))
-        train_Accs = train(train_loader, models, criterion, optimizer, logger, epoch)
-        torch.cuda.empty_cache()
-        for idx, arch_idx in enumerate(config.arch_idx):
-            if arch_idx == 0:
-                logger.add_scalar("Acc/train_8", train_Accs[idx][0], epoch)
-                logging.info("layer8 train_Acc %.3f"%(train_Accs[idx][0]))
-                logger.add_scalar("Acc/train_16", train_Accs[idx][1], epoch)
-                logging.info("layer16 train_Acc %.3f" % (train_Accs[idx][1]))
-                logger.add_scalar("Acc/train_32", train_Accs[idx][2], epoch)
-                logging.info("layer32 train_Acc %.3f" % (train_Accs[idx][2]))
-                logger.add_scalar("Acc/train_final", train_Accs[idx][3], epoch)
-                logging.info("final train_Acc %.3f" % (train_Accs[idx][3]))
-            else:
-                logger.add_scalar("mIoU/train_student", train_mIoUs[idx], epoch)
-                logging.info("student's train_mIoU %.3f"%(train_mIoUs[idx]))
-        adjust_learning_rate(base_lr, 0.992, optimizer, epoch+1, config.nepochs)
+            # validation
+            if not config.is_test and ((epoch+1) % 10 == 0 or epoch == 0):
+                tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
+                with torch.no_grad():
+                    acc8, acc16, acc32, acc_final = infer(models[0], val_loader, epoch=epoch, logger=logger)
+                    for idx, arch_idx in enumerate(config.arch_idx):
+                        if arch_idx == 0:
+                            logger.add_scalar("Val_Acc/val_8", acc8, epoch)
+                            logging.info("layer8 val_Acc %.3f" % (acc8))
+                            logger.add_scalar("Val_Acc/val_16", acc16, epoch)
+                            logging.info("layer16 val_Acc %.3f" % (acc16))
+                            logger.add_scalar("Val_Acc/val_32", acc32, epoch)
+                            logging.info("layer32 val_Acc %.3f" % (acc32))
+                            logger.add_scalar("Val_Acc/val_final", acc_final, epoch)
+                            logging.info("final val_Acc %.3f" % (acc_final))
+                        else:
+                            logger.add_scalar("mIoU/val_student", valid_mIoUs[idx], epoch)
+                            logging.info("student's valid_mIoU %.3f"%(valid_mIoUs[idx]))
+                        save(models[idx], os.path.join(config.save, "weights%d.pt"%arch_idx))
 
-        # validation
-        if not config.is_test and ((epoch+1) % 10 == 0 or epoch == 0):
-            tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
-            with torch.no_grad():
-                acc8, acc16, acc32, acc_final = infer(models[0], val_loader, epoch=epoch, logger=logger)
-                for idx, arch_idx in enumerate(config.arch_idx):
-                    if arch_idx == 0:
-                        logger.add_scalar("Val_Acc/val_8", acc8, epoch)
-                        logging.info("layer8 val_Acc %.3f" % (acc8))
-                        logger.add_scalar("Val_Acc/val_16", acc16, epoch)
-                        logging.info("layer16 val_Acc %.3f" % (acc16))
-                        logger.add_scalar("Val_Acc/val_32", acc32, epoch)
-                        logging.info("layer32 val_Acc %.3f" % (acc32))
-                        logger.add_scalar("Val_Acc/val_final", acc_final, epoch)
-                        logging.info("final val_Acc %.3f" % (acc_final))
-                    else:
-                        logger.add_scalar("mIoU/val_student", valid_mIoUs[idx], epoch)
-                        logging.info("student's valid_mIoU %.3f"%(valid_mIoUs[idx]))
-                    save(models[idx], os.path.join(config.save, "weights%d.pt"%arch_idx))
-        # test
-        if config.is_test and (epoch+1) >= 250 and (epoch+1) % 10 == 0:
-            tbar.set_description("[Epoch %d/%d][test...]" % (epoch + 1, config.nepochs))
-            with torch.no_grad():
-                test(epoch, models, testers, logger)
+    if config.is_eval:
+        # write_features(model, train_loader, config, part="train", dataset="cifar10")
+        write_features(model, val_loader, config, part="val", dataset="cifar10")
 
-        for idx, arch_idx in enumerate(config.arch_idx):
-            save(models[idx], os.path.join(config.save, "weights%d.pt"%arch_idx))
+
+
+    # test
+    if config.is_test and (epoch+1) >= 250 and (epoch+1) % 10 == 0:
+        tbar.set_description("[Epoch %d/%d][test...]" % (epoch + 1, config.nepochs))
+        with torch.no_grad():
+            test(epoch, models, testers, logger)
+
+    for idx, arch_idx in enumerate(config.arch_idx):
+        save(models[idx], os.path.join(config.save, "weights%d.pt"%arch_idx))
 
 
 def train(train_loader, models, criterion, optimizer, logger, epoch):
@@ -398,6 +429,59 @@ def infer(model, val_loader, device=torch.device("cuda"), epoch= 0, logger = Non
     logger.add_scalar('val/re_loss', re_loss, epoch)
     logger.add_scalar('val/kl_loss', kl_loss, epoch)
     return metrics.get_scores()
+
+
+def write_features(model, train_loader, config, dataset="cifar10", part="train",  device=torch.device("cuda")):
+
+    open('{}_fea/{}_mu32.txt'.format(part, dataset), 'w').close()
+    open('{}_fea/{}_mu16.txt'.format(part, dataset), 'w').close()
+    open('{}_fea/{}_mu8.txt'.format(part, dataset), 'w').close()
+    open('{}_fea/{}_target.txt'.format(part, dataset), 'w').close()
+    open('{}_fea/{}_pred.txt'.format(part, dataset), 'w').close()
+    open('{}_fea/{}_re_loss.txt'.format(part, dataset), 'w').close()
+
+    model.eval()
+
+
+    for data, target in train_loader:
+        target_en = torch.Tensor(target.shape[0], config.num_classes)
+        target_en.zero_()
+        target_en.scatter_(1, target.view(-1, 1), 1)  # one-hot encoding
+        target_en = target_en.to(device)
+        data, target = data.to(device), target.to(device)
+        pred8, pred16, pred_32, pred_final, reconstructed, \
+            latent_mu, latent_var, yh = model(data, target_en)
+
+        re_loss = ((reconstructed - data)**2).view(config.batch_size, -1).mean(1)
+        # print(re_loss.shape)
+        pred = pred8.max(1, keepdim=True)[1]
+        print(pred)
+        latent_mu32 = torch.Tensor.cpu(latent_mu[0]).detach().numpy()
+        latent_mu16 = torch.Tensor.cpu(latent_mu[1]).detach().numpy()
+        latent_mu8 = torch.Tensor.cpu(latent_mu[2]).detach().numpy()
+        re_loss = torch.Tensor.cpu(re_loss).detach().numpy()
+        target = torch.Tensor.cpu(target).detach().numpy()
+        pred = torch.Tensor.cpu(pred).detach().numpy()
+        with open('{}_fea/{}_mu32.txt'.format(part, dataset), 'ab') as f_test:
+            np.savetxt(f_test, latent_mu32, fmt='%f', delimiter=' ', newline='\r')
+            f_test.write(b'\n')
+        with open('{}_fea/{}_mu16.txt'.format(part, dataset), 'ab') as f_test:
+            np.savetxt(f_test, latent_mu16, fmt='%f', delimiter=' ', newline='\r')
+            f_test.write(b'\n')
+        with open('{}_fea/{}_mu8.txt'.format(part, dataset), 'ab') as f_test:
+            np.savetxt(f_test, latent_mu8, fmt='%f', delimiter=' ', newline='\r')
+            f_test.write(b'\n')
+        with open('{}_fea/{}_target.txt'.format(part, dataset), 'ab') as f_test:
+            np.savetxt(f_test, target, fmt='%f', delimiter=' ', newline='\r')
+            f_test.write(b'\n')
+        with open('{}_fea/{}_pred.txt'.format(part, dataset), 'ab') as f_test:
+            np.savetxt(f_test, pred, fmt='%f', delimiter=' ', newline='\r')
+            f_test.write(b'\n')
+        with open('{}_fea/{}_re_loss.txt'.format(part, dataset), 'ab') as f_test:
+            np.savetxt(f_test, re_loss, fmt='%f', delimiter=' ', newline='\r')
+            f_test.write(b'\n')
+
+
 
 def test(epoch, models, testers, logger):
     for idx, arch_idx in enumerate(config.arch_idx):

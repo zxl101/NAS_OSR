@@ -34,6 +34,8 @@ from model_seg import Network_Multi_Path_Infer
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
+from sklearn.metrics import roc_auc_score
+
 import argparse
 
 parser = argparse.ArgumentParser(description='PyTorch OSR Example')

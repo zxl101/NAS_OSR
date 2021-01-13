@@ -104,6 +104,7 @@ elif C.mode == "student":
     C.save = "%dx%d_student_batch%d"%(C.image_height, C.image_width, C.batch_size)
 
 ########################################
+C.is_train = True
 C.is_test = False # if True, prediction files for the test set will be generated
 C.is_eval = False # if True, the train.py will only do evaluation for once
-C.eval_path = "fasterseg" # path to pretrained directory to be evaluated
+C.eval_path = "train-64x64_teacher_batch25-20210106-142442_lr0.002" # path to pretrained directory to be evaluated

@@ -80,7 +80,7 @@ C.layers = 6 # layers (cells) for supernet
 C.branch = 3 # number of output branches
 
 C.pretrain = True
-# C.pretrain = "search-pretrain-256x512_F12.L6_batch25-20201218-174809_ce_re_kl"
+# C.pretrain = "search-pretrain-2x2_F12.L6_batch25_1_1_1_lr0-20210109-214515"
 ########################################
 # C.prun_modes = ['max', 'arch_ratio',] # channel pruning mode for [teacher, student], i.e. by default teacher will use max channel number, and student will sample the channel number based on arch_ratio
 C.prun_modes = ['arch_ratio',]
@@ -97,7 +97,7 @@ if C.pretrain == True:
     C.latency_weight = [0, 0] # weight of latency penalty loss
     C.image_height =2 # this size is after down_sampling
     C.image_width = 2
-    C.nepochs = 50
+    C.nepochs = 100
     C.save = "pretrain-%dx%d_F%d.L%d_batch%d"%(C.image_height, C.image_width, C.Fch, C.layers, C.batch_size)
 else:
     C.batch_size = 25
