@@ -36,7 +36,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
 import pickle
-
+import PIL
 import argparse
 
 reconstruction_function = nn.MSELoss()
@@ -70,6 +70,9 @@ parser.add_argument('--lr', type=float, default=None, help='learning rate (defau
 # parser.add_argument('--val_interval', type=int, default=5, help='how many epochs to wait before another val')
 # parser.add_argument('--test_interval', type=int, default=5, help='how many epochs to wait before another test')
 # parser.add_argument('--lamda', type=int, default=100, help='lamda in loss function')
+parser.add_argument('--load_path', type=str, default=None)
+parser.add_argument('--load_epoch', type=str, default=None)
+parser.add_argument('--layers', type=int, default=None)
 parser.add_argument('--wce', type=float, default=1)
 parser.add_argument('--wre', type=float, default=1)
 parser.add_argument('--wkl', type=float, default=1)
@@ -81,8 +84,20 @@ def main():
     config.wre = args.wre
     config.wkl = args.wkl
 
+
     if args.lr != None:
         config.lr = args.lr
+    if args.batch_size != None:
+        config.batch_size = args.batch_size
+        config.niters_per_epoch = config.num_train_imgs // 2 // config.batch_size
+    if args.nepochs != None:
+        config.nepochs = args.nepochs
+    if args.load_path != None:
+        config.load_path = args.load_path
+    if args.load_epoch != None:
+        config.load_epoch - args.load_epoch
+    if args.layers != None:
+        config.layers = args.layers
 
     create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
@@ -126,38 +141,57 @@ def main():
     #
     # train_loader = get_train_loader(config, Cityscapes, test=config.is_test)
 
-    train_dataset = datasets.MNIST('data/mnist', download=True, train=True,
-                                   transform=transforms.Compose([
-
-                                       transforms.ToTensor(),
-                                       transforms.Resize(64),
-                                       transforms.Normalize((0.1307,), (0.3081,)),
-                                   transforms.Lambda(lambda x: x.repeat(3, 1, 1) )]))
-
-
-    # train_dataset = datasets.CIFAR10('data/cifar10', download=True, train=True,
-    #                                  transform=transforms.Compose([
-    #
-    #                                      transforms.ToTensor(),
-    #                                      transforms.Resize(64),
-    #                                      transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
-    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
-
-
-
-    # val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,
+    # train_dataset = datasets.MNIST('data/mnist', download=True, train=True,
     #                                transform=transforms.Compose([
     #
     #                                    transforms.ToTensor(),
     #                                    transforms.Resize(64),
-    #                                    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
-    val_dataset = datasets.MNIST('data/mnist', download=False, train=False,
-                                  transform=transforms.Compose([
+    #                                    transforms.Normalize((0.1307,), (0.3081,)),
+    #                                transforms.Lambda(lambda x: x.repeat(3, 1, 1) )]))
 
-                                      transforms.ToTensor(),
-                                      transforms.Resize(64),
-                                      transforms.Normalize((0.1307,), (0.3081,)),
-                                  transforms.Lambda(lambda x: x.repeat(3, 1, 1) )]))
+    # train_dataset = datasets.SVHN('data/svhn', download=True, split="train",
+    #                               transform=transforms.Compose([
+    #                                   transforms.ToTensor(),
+    #                                   transforms.Resize(64)
+    #                                   # transforms.Normalize((0.5,),(0.5,))
+    #                                   # transforms.Lambda(lambda x: x.repeat(3,1,1))
+    #                               ]))
+    train_dataset = datasets.CIFAR10('data/cifar10', download=True, train=True,
+                                     transform=transforms.Compose([
+
+                                         transforms.ToTensor(),
+                                         transforms.Resize(64),
+                                         transforms.ColorJitter(hue=.05, saturation=.05),
+                                         transforms.RandomHorizontalFlip(),
+                                         transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
+                                         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
+
+
+
+    val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,
+                                   transform=transforms.Compose([
+
+                                       transforms.ToTensor(),
+                                       transforms.Resize(64),
+                                       # transforms.ColorJitter(hue=.05, saturation=.05),
+                                       # transforms.RandomHorizontalFlip(),
+                                       # transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
+                                       transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+    # val_dataset = datasets.MNIST('data/mnist', download=False, train=False,
+    #                               transform=transforms.Compose([
+    #
+    #                                   transforms.ToTensor(),
+    #                                   transforms.Resize(64),
+    #                                   transforms.Normalize((0.1307,), (0.3081,)),
+    #                               transforms.Lambda(lambda x: x.repeat(3, 1, 1) )]))
+    # val_dataset = datasets.SVHN('data/svhn', download=False, split="test",
+    #                               transform=transforms.Compose([
+    #                                   transforms.ToTensor(),
+    #                                   transforms.Resize(64)
+    #                                   # transforms.Normalize((0.5,), (0.5,))
+    #                                   # transforms.Lambda(lambda x: x.repeat(3,1,1))
+    #                               ]))
     # val_dataset = datasets.CIFAR100('data/cifar100', download=True, train=False,
     #                                transform=transforms.Compose([
     #
@@ -282,13 +316,15 @@ def main():
                     logging.info("layer32 train_Acc %.3f" % (train_Accs[idx][2]))
                     logger.add_scalar("Acc/train_final", train_Accs[idx][3], epoch)
                     logging.info("final train_Acc %.3f" % (train_Accs[idx][3]))
+                    # logger.add_scalar("AUROC/train_final", train_Accs[idx][4], epoch)
+                    # logging.info("final train_AUROC %.3f" % (train_Accs[idx][4]))
                 else:
                     logger.add_scalar("mIoU/train_student", train_mIoUs[idx], epoch)
                     logging.info("student's train_mIoU %.3f"%(train_mIoUs[idx]))
             adjust_learning_rate(base_lr, 0.992, optimizer, epoch+1, config.nepochs)
 
             # validation
-            if not config.is_test and ((epoch+1) % 10 == 0 or epoch == 0):
+            if not config.is_test and ((epoch+1) % 1 == 0 or epoch == 0):
                 tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
                 with torch.no_grad():
                     acc8, acc16, acc32, acc_final = infer(models[0], val_loader, epoch=epoch, logger=logger)
@@ -302,6 +338,8 @@ def main():
                             logging.info("layer32 val_Acc %.3f" % (acc32))
                             logger.add_scalar("Val_Acc/val_final", acc_final, epoch)
                             logging.info("final val_Acc %.3f" % (acc_final))
+                            # logger.add_scalar("Val_AUROC/val_final", auroc, epoch)
+                            # logging.info("final val_AUROC %.3f" % (auroc))
                         else:
                             logger.add_scalar("mIoU/val_student", valid_mIoUs[idx], epoch)
                             logging.info("student's valid_mIoU %.3f"%(valid_mIoUs[idx]))
@@ -382,6 +420,7 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
             description += "[Acc%d_16: %.3f]" % (arch_idx, metrics[idx].get_scores()[1])
             description += "[Acc%d_32: %.3f]" % (arch_idx, metrics[idx].get_scores()[2])
             description += "[Acc%d_final: %.3f]" % (arch_idx, metrics[idx].get_scores()[3])
+            # description += "[AUROC_final: %.3f]" % (arch_idx, metrics[idx].get_scores()[4])
 
         pbar.set_description("[Step %d/%d]"%(step + 1, len(train_loader)) + description)
         logger.add_scalar('train/ce_loss', ce_loss, epoch * len(pbar) + step)
@@ -422,9 +461,9 @@ def infer(model, val_loader, device=torch.device("cuda"), epoch= 0, logger = Non
         for i in range(3):
             pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
             kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-    ce_loss = ce_loss / total_num
-    re_loss =re_loss / total_num
-    kl_loss = kl_loss / total_num
+    ce_loss = ce_loss
+    re_loss =re_loss
+    kl_loss = kl_loss
     logger.add_scalar('val/ce_loss', ce_loss, epoch)
     logger.add_scalar('val/re_loss', re_loss, epoch)
     logger.add_scalar('val/kl_loss', kl_loss, epoch)

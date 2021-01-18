@@ -35,7 +35,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
 from sklearn.metrics import roc_auc_score
-
+import PIL
 import argparse
 
 parser = argparse.ArgumentParser(description='PyTorch OSR Example')
@@ -66,7 +66,7 @@ def main(pretrain=True):
     config.wkl = args.wkl
     if args.batch_size != None:
         config.batch_size = args.batch_size
-        config.niters_per_epoch = config.num_train_imgs // 2 // config.batch_size
+        config.niters_per_epoch = min(config.num_train_imgs // 2 // config.batch_size, 400)
     if args.num_classes != None:
         config.num_classes = args.num_classes
     if args.nepochs != None:
@@ -173,7 +173,7 @@ def main(pretrain=True):
         weight_decay=config.weight_decay)
 
     # lr policy ##############################
-    lr_policy = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.978)
+    lr_policy = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.990)
 
     # data loader ###########################
     # data_setting = {'img_root': config.img_root_folder,
@@ -192,7 +192,10 @@ def main(pretrain=True):
 
                                        transforms.ToTensor(),
                                        transforms.Resize(64),
-                                       transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5))]))
+                                       transforms.ColorJitter(hue=.05, saturation=.05),
+                                       transforms.RandomHorizontalFlip(),
+                                       transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
+                                       transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
     train_loader_model = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
     train_dataset_arch = datasets.CIFAR10('data/cifar10', download=False, train=True,
@@ -200,7 +203,10 @@ def main(pretrain=True):
 
                                        transforms.ToTensor(),
                                        transforms.Resize(64),
-                                       transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5))]))
+                                       transforms.ColorJitter(hue=.05, saturation=.05),
+                                       transforms.RandomHorizontalFlip(),
+                                       transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
+                                       transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
     train_loader_arch = DataLoader(train_dataset_arch, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
     val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,
@@ -208,7 +214,7 @@ def main(pretrain=True):
 
                                      transforms.ToTensor(),
                                      transforms.Resize(64),
-                                     transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5))]))
+                                     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
     print("The size of the validation set is: {}".format(len(val_loader.dataset)))
 
@@ -231,6 +237,7 @@ def main(pretrain=True):
 
         # training
         tbar.set_description("[Epoch %d/%d][train...]" % (epoch + 1, config.nepochs))
+        # print("The learning rate of current epoch is {}".format(optimizer.lr))
         train(pretrain, train_loader_model, train_loader_arch, model, architect, optimizer, lr_policy, logger, epoch, update_arch=update_arch, config=config, device=device)
         torch.cuda.empty_cache()
         lr_policy.step()
@@ -345,7 +352,9 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
     for step in pbar:
         optimizer.zero_grad()
 
+
         minibatch = dataloader_model.next()
+        imgs = minibatch[0]
         imgs = minibatch[0]
         target = minibatch[1]
         target_en = torch.Tensor(target.shape[0], config.num_classes)

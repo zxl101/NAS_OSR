@@ -79,8 +79,8 @@ C.arch_weight_decay = 0
 C.layers = 6 # layers (cells) for supernet
 C.branch = 3 # number of output branches
 
-C.pretrain = True
-# C.pretrain = "search-pretrain-2x2_F12.L6_batch25_1_1_1_lr0-20210109-214515"
+# C.pretrain = True
+C.pretrain = "search-pretrain-2x2_F12.L6_batch25_1_1_0_lr0-20210117-010630"
 ########################################
 # C.prun_modes = ['max', 'arch_ratio',] # channel pruning mode for [teacher, student], i.e. by default teacher will use max channel number, and student will sample the channel number based on arch_ratio
 C.prun_modes = ['arch_ratio',]

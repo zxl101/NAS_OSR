@@ -10,6 +10,7 @@
 
 import numpy as np
 import torch
+from sklearn.metrics import roc_auc_score
 
 
 class Cls_Metrics(object):
@@ -20,6 +21,7 @@ class Cls_Metrics(object):
         self.correct32 = 0
         self.correct_final = 0
         self.total = 0
+        # self.auroc = []
 
 
     def update(self, pred8, pred16, pred32, pred_final, target):
@@ -29,6 +31,7 @@ class Cls_Metrics(object):
         self.correct32 += c32
         self.correct_final += c_final
         self.total += total
+        # self.auroc.append(roc_auc_score(torch.Tensor.cpu(target).detach().numpy(), torch.Tensor.cpu(pred_final).detach().numpy()))
 
     def get_scores(self):
 
@@ -40,6 +43,7 @@ class Cls_Metrics(object):
         self.correct32 = 0
         self.correct_final = 0
         self.total = 0
+        # self.auroc = []
 
 
 def batch_cls(pred8, pred16, pred32, pred_final, target):
