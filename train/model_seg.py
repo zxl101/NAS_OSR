@@ -23,6 +23,69 @@ def sample_gaussian(m, v):
 def softmax(x):
     return np.exp(x) / (np.exp(x).sum() + np.spacing(1))
 
+class TCONV(nn.Module):
+    def __init__(self, in_size, unflat_dim, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride, out_dim, t_latent_dim):
+        super(TCONV, self).__init__()
+        self.in_size = in_size
+        self.unflat_dim = unflat_dim
+        self.t_in_ch = t_in_ch
+        self.t_out_ch = t_out_ch
+        self.t_kernel = t_kernel
+        self.t_stride = t_stride
+        self.t_padding = t_padding
+        self.out_dim = out_dim
+        self.t_latent_dim = t_latent_dim
+        self.weight = 1
+        self.bias = 0
+
+        self.fc = nn.Linear(in_size, t_in_ch * unflat_dim * unflat_dim)
+        self.net = nn.Sequential(
+            nn.PReLU(),
+            nn.ConvTranspose2d(t_in_ch, t_out_ch, kernel_size=t_kernel, padding=t_padding, stride=t_stride),  # (w-k+2p)/s+1
+            nn.BatchNorm2d(t_out_ch),
+        )
+        self.mean_layer = nn.Sequential(
+            nn.Linear(t_out_ch*out_dim*out_dim, t_latent_dim)
+        )
+        self.var_layer = nn.Sequential(
+            nn.Linear(t_out_ch*out_dim*out_dim, t_latent_dim)
+        )
+
+    def decode(self, x):
+        x = self.fc(x)
+        x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
+        h = self.net(x)
+        h_flat = h.view(-1, self.t_out_ch * self.out_dim * self.out_dim)
+        mu, var = self.mean_layer(h_flat), self.var_layer(h_flat)
+        var = F.softplus(var) + 1e-8
+        # mu, var = ut.gaussian_parameters(h, dim=1)
+        return h, mu, var
+
+class FCONV(nn.Module):
+    def __init__(self, in_size, unflat_dim, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride):
+        super(FCONV, self).__init__()
+        self.in_size = in_size
+        self.unflat_dim = unflat_dim
+        self.t_in_ch = t_in_ch
+        self.t_out_ch = t_out_ch
+        self.t_kernel = t_kernel
+        self.t_stride = t_stride
+        self.t_padding = t_padding
+
+        self.fc_final = nn.Linear(in_size, t_in_ch * unflat_dim * unflat_dim)
+        self.final = nn.Sequential(
+            nn.PReLU(),
+            nn.ConvTranspose2d(t_in_ch, t_out_ch, kernel_size=t_kernel, padding=t_padding, stride=t_stride),  # (w-k+2p)/s+1
+            #nn.Sigmoid()
+            nn.Tanh()
+        )
+
+    def final_decode(self,x):
+        x = self.fc_final(x)
+        x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
+        x_re = self.final(x)
+        return x_re
+
 
 def path2downs(path):
     '''
@@ -330,6 +393,28 @@ class Network_Multi_Path_Infer(nn.Module):
         self.fc1 = nn.Linear(30, 30)
         self.fc2 = nn.Linear(30, 15)
         self.fc3 = nn.Linear(15,10)
+
+        # self.TCONV5_2 = TCONV(32, 2, 512, 512, 2,
+        #                       0, 2, 4, 64)
+        # self.TCONV5_1 = TCONV(32, 4, 512, 512, 1,
+        #                       0, 1, 4, 64)
+        #
+        # self.TCONV4_2 = TCONV(64, 4, 512, 512, 2,
+        #                       0, 2, 8, 128)
+        # self.TCONV4_1 = TCONV(64, 8, 512, 256, 1,
+        #                       0, 1, 8, 128)
+        #
+        # self.TCONV3_2 = TCONV(128, 8, 256, 256, 2,
+        #                       0, 2, 16, 256)
+        # self.TCONV3_1 = TCONV(128, 16, 256, 128, 1,
+        #                       0, 1, 16, 256)
+        # self.TCONV2_2 = TCONV(256, 16, 128, 128, 2,
+        #                       0, 2, 32, 512)
+        # self.TCONV1_2 = TCONV(512, 32, 64, 64, 2,
+        #                       0, 2, 64, 512)
+        # self.TCONV1_1 = FCONV(512, 64, 64, 3, 1,
+        #                       0, 1)
+
         # if 2 in self.lasts:
         #     self.arms32 = nn.ModuleList([
         #         ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]), 1, 1, 0, slimmable=False),
@@ -465,6 +550,13 @@ class Network_Multi_Path_Infer(nn.Module):
         # predict_test8 = F.log_softmax(self.classifier8(latent_mu), dim=1)
         yh8 = self.one_hot8(label_en)
 
+        qmu5_1 = None
+        qvar5_1 = None
+        qmu4_1 = None
+        qvar4_1 = None
+
+
+        # Simple decoder
         out32 = outputs32
         # print(out32.shape)
         out16 = F.interpolate(self.refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
@@ -476,11 +568,39 @@ class Network_Multi_Path_Infer(nn.Module):
         out1 = F.interpolate(self.refine2[0](out2), scale_factor=2, mode="bilinear", align_corners=True)
         reconstructed = self.reconstruct[0](self.refine1[0](out1))
 
+        # structural ladder structure
+        # dec5_1, mu_dn5_1, var_dn5_1 = self.TCONV5_2.decode(latent32)
+        # prec_up5_1 = latent_var16 ** (-1)
+        # prec_dn5_1 = var_dn5_1 ** (-1)
+        # qmu5_1 = (latent_mu16 * prec_up5_1 + mu_dn5_1 * prec_dn5_1) / (prec_up5_1 + prec_dn5_1)
+        # qvar5_1 = (prec_up5_1 + prec_dn5_1) ** (-1)
+        # de_latent5_1 = sample_gaussian(qmu5_1, qvar5_1)
+
+
+        # dec4_1, mu_dn4_1, var_dn4_1 = self.TCONV4_2.decode(de_latent5_1)
+        # prec_up4_1 = latent_var8 ** (-1)
+        # prec_dn4_1 = var_dn4_1 ** (-1)
+        # qmu4_1 = (latent_mu8 * prec_up4_1 + mu_dn4_1 * prec_dn4_1) / (prec_up4_1 + prec_dn4_1)
+        # qvar4_1 = (prec_up4_1 + prec_dn4_1) ** (-1)
+        # de_latent4_1 = sample_gaussian(qmu4_1, qvar4_1)
+        #
+        # dec3_1, mu_dn3_1, var_dn3_1 = self.TCONV3_2.decode(de_latent4_1)
+        # de_latent3_1 = sample_gaussian(mu_dn3_1, var_dn3_1)
+        #
+        # dec2_1, mu_dn2_1, var_dn2_1 = self.TCONV2_2.decode(de_latent3_1)
+        # de_latent2_1 = sample_gaussian(mu_dn2_1, var_dn2_1)
+        # dec1_1, mu_dn1_1, var_dn1_1 = self.TCONV1_2.decode(de_latent2_1)
+        # de_latent1_1 = sample_gaussian(mu_dn1_1, var_dn1_1)
+        # # print(dec1_1.shape)
+        # # print(de_latent1_1.shape)
+        # reconstructed = self.TCONV1_1.final_decode(de_latent1_1)
+
+
 
         pred_final = F.log_softmax(self.fc3(self.fc2(self.fc1(torch.cat((predict8,predict16,predict32),dim=1)))),dim=1)
 
         return predict32, predict16, predict8, pred_final, reconstructed, \
-               [latent_mu32, latent_mu16, latent_mu8], [latent_var32, latent_var16, latent_var8], [yh32, yh16, yh8]
+               [latent_mu32, latent_mu16, latent_mu8], [latent_var32, latent_var16, latent_var8], [yh32, yh16, yh8], [qmu5_1,qvar5_1],[qmu4_1,qvar4_1]
         # if len(pred32) > 0:
         #     pred32 = self.heads32(torch.cat(pred32, dim=1))
         # else:
@@ -534,8 +654,8 @@ class Network_Multi_Path_Infer(nn.Module):
         output16 = outputs16.cuda()
         output32 = outputs32.cuda()
         pred8, pred16, pred32, pred_final, reconstructed,\
-            latent_mu, latent_var, yh = self.agg_ffm(outputs8, outputs16, outputs32, label_en)
-        return pred8, pred16, pred32, pred_final, reconstructed, latent_mu, latent_var, yh
+            latent_mu, latent_var, yh, up32, up16 = self.agg_ffm(outputs8, outputs16, outputs32, label_en)
+        return pred8, pred16, pred32, pred_final, reconstructed, latent_mu, latent_var, yh, up32, up16
 
     def forward_latency(self, size):
         _, H, W = size

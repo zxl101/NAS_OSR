@@ -81,7 +81,7 @@ if C.mode == "teacher":
     C.branch = [3] # number of output branches
     C.width_mult_list = [4./12, 6./12, 8./12, 10./12, 1.,] # selection choices for channel pruning
     C.stem_head_width = [(1, 1)] # width ratio (#channel / Fch) for [teacher, student]
-    C.load_path = "search-2x2_F12.L6_batch100-20210105-163825" # path to the searched directory
+    C.load_path = "search-2x2_F12.L6_batch5000_1_1_0_lr0-20210119-093542" # path to the searched directory
     C.load_epoch = "last" # "last" or "int" (e.g. "30"): which epoch to load from the searched architecture
     C.batch_size = 25
     C.Fch = 12 # base channel number

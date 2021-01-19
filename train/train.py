@@ -402,16 +402,23 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
                     logits_list.append(logits8)
             else:
                 logits8, logits16, logits32, logits_final, reconstructed,\
-                    latent_mu, latent_var, yh = model(imgs, target_en)
+                    latent_mu, latent_var, yh, up32, up16 = model(imgs, target_en)
                 # logits_list.append(logits8)
                 ce_loss = ce_loss + 2 * lamb * criterion(logits32, target)
                 ce_loss = ce_loss + lamb * criterion(logits16, target)
                 ce_loss = ce_loss + lamb * criterion(logits8, target)
                 ce_loss = ce_loss + criterion(logits_final, target)
                 re_loss = re_loss + reconstruction_function(reconstructed, imgs)
-                for i in range(3):
-                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+                if up32[0] != None:
+                    pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
+                    kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
+                    kl16 = kl_normal(up32[0],up32[1],latent_mu[1],latent_var[1],0)
+                    kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
+                    kl_loss = kl_loss + torch.mean(kl32 + kl16 + kl8)
+                else:
+                    for i in range(3):
+                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
                 # if len(logits_list) > 1:
                 #     loss = loss + distill_criterion(F.softmax(logits_list[1], dim=1).log(), F.softmax(logits_list[0], dim=1))
 
@@ -451,19 +458,26 @@ def infer(model, val_loader, device=torch.device("cuda"), epoch= 0, logger = Non
         target_val_en = target_val_en.to(device)
         data_val, target_val = data_val.to(device), target_val.to(device)
         logits8, logits16, logits32, logit_final, reconstructed,\
-            latent_mu, latent_var, yh = model(data_val, target_val_en)
+            latent_mu, latent_var, yh, up32, up16 = model(data_val, target_val_en)
         metrics.update(logits8, logits16, logits32, logit_final, target_val)
         ce_loss = ce_loss + 2 * lamb * criterion(logits32, target_val)
         ce_loss = ce_loss + lamb * criterion(logits16, target_val)
         ce_loss = ce_loss + lamb * criterion(logits8, target_val)
         ce_loss = ce_loss + criterion(logit_final, target_val)
         re_loss = re_loss + reconstruction_function(reconstructed, data_val)
-        for i in range(3):
-            pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-            kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-    ce_loss = ce_loss
-    re_loss =re_loss
-    kl_loss = kl_loss
+        if up32[0] != None:
+            pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
+            kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
+            kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
+            kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
+            kl_loss = kl_loss + torch.mean(kl32 + kl16 + kl8)
+        else:
+            for i in range(3):
+                pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+    # ce_loss = ce_loss
+    # re_loss =re_loss
+    # kl_loss = kl_loss
     logger.add_scalar('val/ce_loss', ce_loss, epoch)
     logger.add_scalar('val/re_loss', re_loss, epoch)
     logger.add_scalar('val/kl_loss', kl_loss, epoch)
@@ -489,7 +503,7 @@ def write_features(model, train_loader, config, dataset="cifar10", part="train",
         target_en = target_en.to(device)
         data, target = data.to(device), target.to(device)
         pred8, pred16, pred_32, pred_final, reconstructed, \
-            latent_mu, latent_var, yh = model(data, target_en)
+            latent_mu, latent_var, yh,_,_ = model(data, target_en)
 
         re_loss = ((reconstructed - data)**2).view(config.batch_size, -1).mean(1)
         # print(re_loss.shape)
