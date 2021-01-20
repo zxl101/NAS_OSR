@@ -195,18 +195,23 @@ def main(pretrain=True):
                                        transforms.ColorJitter(hue=.05, saturation=.05),
                                        transforms.RandomHorizontalFlip(),
                                        transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
-                                       transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
-    train_loader_model = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
+                                       transforms.Normalize((0.5,), (0.5,))
+                                   ]))
+    train_dataset_model, train_dataset_arch = torch.utils.data.random_split(train_dataset,[25000,25000])
+    # print(len(train_dataset_model))
+    # print(len(train_datset_arch))
+    # return None
+    train_loader_model = DataLoader(train_dataset_model, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
-    train_dataset_arch = datasets.CIFAR10('data/cifar10', download=False, train=True,
-                                   transform=transforms.Compose([
-
-                                       transforms.ToTensor(),
-                                       transforms.Resize(64),
-                                       transforms.ColorJitter(hue=.05, saturation=.05),
-                                       transforms.RandomHorizontalFlip(),
-                                       transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
-                                       transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+    # train_dataset_arch = datasets.CIFAR10('data/cifar10', download=False, train=True,
+    #                                transform=transforms.Compose([
+    #
+    #                                    transforms.ToTensor(),
+    #                                    transforms.Resize(64),
+    #                                    transforms.ColorJitter(hue=.05, saturation=.05),
+    #                                    transforms.RandomHorizontalFlip(),
+    #                                    transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
+    #                                    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
     train_loader_arch = DataLoader(train_dataset_arch, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
     val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,

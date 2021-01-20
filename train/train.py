@@ -37,6 +37,7 @@ from torch.utils.data import DataLoader
 
 import pickle
 import PIL
+from PIL import Image
 import argparse
 
 reconstruction_function = nn.MSELoss()
@@ -164,7 +165,8 @@ def main():
                                          transforms.ColorJitter(hue=.05, saturation=.05),
                                          transforms.RandomHorizontalFlip(),
                                          transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
-                                         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+                                         transforms.Normalize((0.5,), (0.5,))
+                                     ]))
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
 
@@ -177,7 +179,8 @@ def main():
                                        # transforms.ColorJitter(hue=.05, saturation=.05),
                                        # transforms.RandomHorizontalFlip(),
                                        # transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
-                                       transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+                                       transforms.Normalize((0.5,), (0.5,))
+                                   ]))
     # val_dataset = datasets.MNIST('data/mnist', download=False, train=False,
     #                               transform=transforms.Compose([
     #
@@ -196,8 +199,9 @@ def main():
     #                                transform=transforms.Compose([
     #
     #                                    transforms.ToTensor(),
-    #                                    transforms.Resize(64),
-    #                                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]))
+    #                                    transforms.Resize(64)
+    #                                    # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    #                                ]))
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
 
@@ -250,11 +254,13 @@ def main():
             state.update(pretrained_dict)
             model.load_state_dict(state)
         elif config.is_eval:
-            partial = torch.load(os.path.join(config.eval_path, "weights%d.pt"%arch_idx))
-            state = model.module.state_dict()
-            pretrained_dict = {k: v for k, v in partial.items() if k in state}
-            state.update(pretrained_dict)
-            model.module.load_state_dict(state)
+            # partial = torch.load(os.path.join(config.eval_path, "weights%d.pt"%arch_idx))
+            # state = model.module.state_dict()
+            # pretrained_dict = {k: v for k, v in partial.items() if k in state}
+            # state.update(pretrained_dict)
+            # model.module.load_state_dict(state)
+            print("Loading trained weights!")
+            model.load_state_dict(torch.load(os.path.join(config.eval_path, "weights0.pt")))
 
         # evaluator = SegEvaluator(Cityscapes(data_setting, 'val', None), config.num_classes, config.image_mean,
         #                          config.image_std, model, config.eval_scale_array, config.eval_flip, 0, out_idx=0, config=config,
@@ -308,12 +314,12 @@ def main():
             torch.cuda.empty_cache()
             for idx, arch_idx in enumerate(config.arch_idx):
                 if arch_idx == 0:
-                    logger.add_scalar("Acc/train_8", train_Accs[idx][0], epoch)
-                    logging.info("layer8 train_Acc %.3f"%(train_Accs[idx][0]))
-                    logger.add_scalar("Acc/train_16", train_Accs[idx][1], epoch)
-                    logging.info("layer16 train_Acc %.3f" % (train_Accs[idx][1]))
-                    logger.add_scalar("Acc/train_32", train_Accs[idx][2], epoch)
-                    logging.info("layer32 train_Acc %.3f" % (train_Accs[idx][2]))
+                    # logger.add_scalar("Acc/train_8", train_Accs[idx][0], epoch)
+                    # logging.info("layer8 train_Acc %.3f"%(train_Accs[idx][0]))
+                    # logger.add_scalar("Acc/train_16", train_Accs[idx][1], epoch)
+                    # logging.info("layer16 train_Acc %.3f" % (train_Accs[idx][1]))
+                    # logger.add_scalar("Acc/train_32", train_Accs[idx][2], epoch)
+                    # logging.info("layer32 train_Acc %.3f" % (train_Accs[idx][2]))
                     logger.add_scalar("Acc/train_final", train_Accs[idx][3], epoch)
                     logging.info("final train_Acc %.3f" % (train_Accs[idx][3]))
                     # logger.add_scalar("AUROC/train_final", train_Accs[idx][4], epoch)
@@ -330,12 +336,12 @@ def main():
                     acc8, acc16, acc32, acc_final = infer(models[0], val_loader, epoch=epoch, logger=logger)
                     for idx, arch_idx in enumerate(config.arch_idx):
                         if arch_idx == 0:
-                            logger.add_scalar("Val_Acc/val_8", acc8, epoch)
-                            logging.info("layer8 val_Acc %.3f" % (acc8))
-                            logger.add_scalar("Val_Acc/val_16", acc16, epoch)
-                            logging.info("layer16 val_Acc %.3f" % (acc16))
-                            logger.add_scalar("Val_Acc/val_32", acc32, epoch)
-                            logging.info("layer32 val_Acc %.3f" % (acc32))
+                            # logger.add_scalar("Val_Acc/val_8", acc8, epoch)
+                            # logging.info("layer8 val_Acc %.3f" % (acc8))
+                            # logger.add_scalar("Val_Acc/val_16", acc16, epoch)
+                            # logging.info("layer16 val_Acc %.3f" % (acc16))
+                            # logger.add_scalar("Val_Acc/val_32", acc32, epoch)
+                            # logging.info("layer32 val_Acc %.3f" % (acc32))
                             logger.add_scalar("Val_Acc/val_final", acc_final, epoch)
                             logging.info("final val_Acc %.3f" % (acc_final))
                             # logger.add_scalar("Val_AUROC/val_final", auroc, epoch)
@@ -346,16 +352,16 @@ def main():
                         save(models[idx], os.path.join(config.save, "weights%d.pt"%arch_idx))
 
     if config.is_eval:
-        # write_features(model, train_loader, config, part="train", dataset="cifar10")
+        write_features(model, train_loader, config, part="train", dataset="cifar10")
         write_features(model, val_loader, config, part="val", dataset="cifar10")
 
 
 
     # test
-    if config.is_test and (epoch+1) >= 250 and (epoch+1) % 10 == 0:
-        tbar.set_description("[Epoch %d/%d][test...]" % (epoch + 1, config.nepochs))
-        with torch.no_grad():
-            test(epoch, models, testers, logger)
+    # if config.is_test and (epoch+1) >= 250 and (epoch+1) % 10 == 0:
+    #     tbar.set_description("[Epoch %d/%d][test...]" % (epoch + 1, config.nepochs))
+    #     with torch.no_grad():
+    #         test(epoch, models, testers, logger)
 
     for idx, arch_idx in enumerate(config.arch_idx):
         save(models[idx], os.path.join(config.save, "weights%d.pt"%arch_idx))
@@ -404,9 +410,9 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
                 logits8, logits16, logits32, logits_final, reconstructed,\
                     latent_mu, latent_var, yh, up32, up16 = model(imgs, target_en)
                 # logits_list.append(logits8)
-                ce_loss = ce_loss + 2 * lamb * criterion(logits32, target)
-                ce_loss = ce_loss + lamb * criterion(logits16, target)
-                ce_loss = ce_loss + lamb * criterion(logits8, target)
+                # ce_loss = ce_loss + 2 * lamb * criterion(logits32, target)
+                # ce_loss = ce_loss + lamb * criterion(logits16, target)
+                # ce_loss = ce_loss + lamb * criterion(logits8, target)
                 ce_loss = ce_loss + criterion(logits_final, target)
                 re_loss = re_loss + reconstruction_function(reconstructed, imgs)
                 if up32[0] != None:
@@ -423,9 +429,9 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
                 #     loss = loss + distill_criterion(F.softmax(logits_list[1], dim=1).log(), F.softmax(logits_list[0], dim=1))
 
             metrics[idx].update(logits8.data, logits16.data, logits32.data, logits_final.data, target)
-            description += "[Acc%d_8: %.3f]"%(arch_idx, metrics[idx].get_scores()[0])
-            description += "[Acc%d_16: %.3f]" % (arch_idx, metrics[idx].get_scores()[1])
-            description += "[Acc%d_32: %.3f]" % (arch_idx, metrics[idx].get_scores()[2])
+            # description += "[Acc%d_8: %.3f]"%(arch_idx, metrics[idx].get_scores()[0])
+            # description += "[Acc%d_16: %.3f]" % (arch_idx, metrics[idx].get_scores()[1])
+            # description += "[Acc%d_32: %.3f]" % (arch_idx, metrics[idx].get_scores()[2])
             description += "[Acc%d_final: %.3f]" % (arch_idx, metrics[idx].get_scores()[3])
             # description += "[AUROC_final: %.3f]" % (arch_idx, metrics[idx].get_scores()[4])
 
@@ -460,9 +466,9 @@ def infer(model, val_loader, device=torch.device("cuda"), epoch= 0, logger = Non
         logits8, logits16, logits32, logit_final, reconstructed,\
             latent_mu, latent_var, yh, up32, up16 = model(data_val, target_val_en)
         metrics.update(logits8, logits16, logits32, logit_final, target_val)
-        ce_loss = ce_loss + 2 * lamb * criterion(logits32, target_val)
-        ce_loss = ce_loss + lamb * criterion(logits16, target_val)
-        ce_loss = ce_loss + lamb * criterion(logits8, target_val)
+        # ce_loss = ce_loss + 2 * lamb * criterion(logits32, target_val)
+        # ce_loss = ce_loss + lamb * criterion(logits16, target_val)
+        # ce_loss = ce_loss + lamb * criterion(logits8, target_val)
         ce_loss = ce_loss + criterion(logit_final, target_val)
         re_loss = re_loss + reconstruction_function(reconstructed, data_val)
         if up32[0] != None:
@@ -490,25 +496,55 @@ def write_features(model, train_loader, config, dataset="cifar10", part="train",
     open('{}_fea/{}_mu16.txt'.format(part, dataset), 'w').close()
     open('{}_fea/{}_mu8.txt'.format(part, dataset), 'w').close()
     open('{}_fea/{}_target.txt'.format(part, dataset), 'w').close()
+    open('{}_fea/{}_logit.txt'.format(part, dataset), 'w').close()
     open('{}_fea/{}_pred.txt'.format(part, dataset), 'w').close()
     open('{}_fea/{}_re_loss.txt'.format(part, dataset), 'w').close()
 
     model.eval()
 
-
+    img_index = 1
+    img_dir = part + "_img"
     for data, target in train_loader:
         target_en = torch.Tensor(target.shape[0], config.num_classes)
         target_en.zero_()
-        target_en.scatter_(1, target.view(-1, 1), 1)  # one-hot encoding
+        # target_en.scatter_(1, target.view(-1, 1), 1)  # one-hot encoding
         target_en = target_en.to(device)
         data, target = data.to(device), target.to(device)
         pred8, pred16, pred_32, pred_final, reconstructed, \
-            latent_mu, latent_var, yh,_,_ = model(data, target_en)
-
+            latent_mu, latent_var, yh, _, _ = model(data, target_en)
+        # print(reconstructed.shape)
         re_loss = ((reconstructed - data)**2).view(config.batch_size, -1).mean(1)
         # print(re_loss.shape)
-        pred = pred8.max(1, keepdim=True)[1]
-        print(pred)
+        re = torch.Tensor.cpu(reconstructed).detach().numpy()
+        ori = torch.Tensor.cpu(data).detach().numpy()
+        # print(re.shape)
+
+        temp = re[0]
+        # print(temp.shape)
+        # temp = np.reshape(temp, (temp.shape[1],temp.shape[2],temp.shape[0]))
+        temp = temp.transpose(1,2,0)
+        temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+        print(np.max(temp))
+        # print(temp.shape)
+        temp = temp * 255
+        temp = temp.astype(np.uint8)
+        img = Image.fromarray(temp)
+        img.save(os.path.join(img_dir,"{}.jpeg".format(img_index)))
+
+        ori = ori[0]
+        ori = ori.transpose(1,2,0)
+        ori = ori * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+        ori = ori * 255
+        ori = ori.astype(np.uint8)
+        print(np.max(ori))
+        ori = Image.fromarray(ori)
+        ori.save(os.path.join(img_dir,"{}_ori.jpeg".format(img_index)))
+        img_index += 1
+        break
+
+        pred = pred_final.max(1, keepdim=True)[1]
+        # print(pred)
+        pred_final = torch.Tensor.cpu(pred_final).detach().numpy()
         latent_mu32 = torch.Tensor.cpu(latent_mu[0]).detach().numpy()
         latent_mu16 = torch.Tensor.cpu(latent_mu[1]).detach().numpy()
         latent_mu8 = torch.Tensor.cpu(latent_mu[2]).detach().numpy()
@@ -526,6 +562,9 @@ def write_features(model, train_loader, config, dataset="cifar10", part="train",
             f_test.write(b'\n')
         with open('{}_fea/{}_target.txt'.format(part, dataset), 'ab') as f_test:
             np.savetxt(f_test, target, fmt='%f', delimiter=' ', newline='\r')
+            f_test.write(b'\n')
+        with open('{}_fea/{}_logit.txt'.format(part, dataset), 'ab') as f_test:
+            np.savetxt(f_test, pred_final, fmt='%f', delimiter=' ', newline='\r')
             f_test.write(b'\n')
         with open('{}_fea/{}_pred.txt'.format(part, dataset), 'ab') as f_test:
             np.savetxt(f_test, pred, fmt='%f', delimiter=' ', newline='\r')

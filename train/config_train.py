@@ -81,7 +81,7 @@ if C.mode == "teacher":
     C.branch = [3] # number of output branches
     C.width_mult_list = [4./12, 6./12, 8./12, 10./12, 1.,] # selection choices for channel pruning
     C.stem_head_width = [(1, 1)] # width ratio (#channel / Fch) for [teacher, student]
-    C.load_path = "search-2x2_F12.L6_batch5000_1_1_0_lr0-20210119-093542" # path to the searched directory
+    C.load_path = "search-2x2_F12.L6_batch25_1_1_0_lr0-20210118-001705" # path to the searched directory
     C.load_epoch = "last" # "last" or "int" (e.g. "30"): which epoch to load from the searched architecture
     C.batch_size = 25
     C.Fch = 12 # base channel number
@@ -107,4 +107,4 @@ elif C.mode == "student":
 C.is_train = True
 C.is_test = False # if True, prediction files for the test set will be generated
 C.is_eval = False # if True, the train.py will only do evaluation for once
-C.eval_path = "train-64x64_teacher_batch25-20210106-142442_lr0.002" # path to pretrained directory to be evaluated
+C.eval_path = "train-64x64_teacher_batch128-20210120-012926" # path to pretrained directory to be evaluated

@@ -77,7 +77,7 @@ class FCONV(nn.Module):
             nn.PReLU(),
             nn.ConvTranspose2d(t_in_ch, t_out_ch, kernel_size=t_kernel, padding=t_padding, stride=t_stride),  # (w-k+2p)/s+1
             #nn.Sigmoid()
-            nn.Tanh()
+            # nn.Tanh()
         )
 
     def final_decode(self,x):
@@ -350,70 +350,102 @@ class Network_Multi_Path_Infer(nn.Module):
             nn.Linear(int(96 * 8 * 8), self.latent_dim128)
         )
 
-        self.refine32 = nn.ModuleList([
-                ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]),
-                         kernel_size=1, bias=False,
-                         groups=1, slimmable=False),
-                ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]),
-                         kernel_size=3, padding=1,
-                         bias=False, groups=1, slimmable=False),
-                ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
-                         kernel_size=1, bias=False,
-                         groups=1, slimmable=False),
-                ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
-                         kernel_size=3, padding=1,
-                         bias=False, groups=1, slimmable=False)])
-        self.refine16 = nn.ModuleList([
-                ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
-                         kernel_size=1, bias=False,
-                         groups=1, slimmable=False),
-                ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
-                         kernel_size=3, padding=1,
-                         bias=False, groups=1, slimmable=False)])
-        self.refine8 = nn.ModuleList([
-            ConvNorm(self.num_filters(8, self._stem_head_width[1]), self.num_filters(4, self._stem_head_width[1]),
-                     kernel_size=3,
-                     padding=1, bias=False, groups=1, slimmable=False)])
-        self.refine4 = nn.ModuleList([
-            ConvNorm(self.num_filters(4, self._stem_head_width[1]), self.num_filters(2, self._stem_head_width[1]),
-                     kernel_size=3,
-                     padding=1, bias=False, groups=1, slimmable=False)])
-        self.refine2 = nn.ModuleList([
-            ConvNorm(self.num_filters(2, self._stem_head_width[1]), self.num_filters(1, self._stem_head_width[1]),
-                     kernel_size=3,
-                     padding=1, bias=False, groups=1, slimmable=False)])
-        self.refine1 = nn.ModuleList([
-            ConvNorm(self.num_filters(1, self._stem_head_width[1]), self.num_filters(1, self._stem_head_width[1]),
-                     kernel_size=3,
-                     padding=1, bias=False, groups=1, slimmable=False)])
-        self.reconstruct = nn.ModuleList([
-            ConvNorm(self.num_filters(1, self._stem_head_width[1]), 3, kernel_size=3,
-                     padding=1, bias=False, groups=1, slimmable=False)])
+        # self.refine32 = nn.ModuleList([
+        #         ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]),
+        #                  kernel_size=1, bias=False,
+        #                  groups=1, slimmable=False),
+        #         ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]),
+        #                  kernel_size=3, padding=1,
+        #                  bias=False, groups=1, slimmable=False),
+        #         ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
+        #                  kernel_size=1, bias=False,
+        #                  groups=1, slimmable=False),
+        #         ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
+        #                  kernel_size=3, padding=1,
+        #                  bias=False, groups=1, slimmable=False)])
+        # self.refine16 = nn.ModuleList([
+        #         ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
+        #                  kernel_size=1, bias=False,
+        #                  groups=1, slimmable=False),
+        #         ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]),
+        #                  kernel_size=3, padding=1,
+        #                  bias=False, groups=1, slimmable=False)])
+        # self.refine8 = nn.ModuleList([
+        #     ConvNorm(self.num_filters(8, self._stem_head_width[1]), self.num_filters(4, self._stem_head_width[1]),
+        #              kernel_size=3,
+        #              padding=1, bias=False, groups=1, slimmable=False)])
+        # self.refine4 = nn.ModuleList([
+        #     ConvNorm(self.num_filters(4, self._stem_head_width[1]), self.num_filters(2, self._stem_head_width[1]),
+        #              kernel_size=3,
+        #              padding=1, bias=False, groups=1, slimmable=False)])
+        # self.refine2 = nn.ModuleList([
+        #     ConvNorm(self.num_filters(2, self._stem_head_width[1]), self.num_filters(1, self._stem_head_width[1]),
+        #              kernel_size=3,
+        #              padding=1, bias=False, groups=1, slimmable=False)])
+        # self.refine1 = nn.ModuleList([
+        #     ConvNorm(self.num_filters(1, self._stem_head_width[1]), self.num_filters(1, self._stem_head_width[1]),
+        #              kernel_size=3,
+        #              padding=1, bias=False, groups=1, slimmable=False)])
+        # self.reconstruct = nn.ModuleList([
+        #     ConvNorm(self.num_filters(1, self._stem_head_width[1]), 3, kernel_size=3,
+        #              padding=1, bias=False, groups=1, slimmable=False)])
 
         self.fc1 = nn.Linear(30, 30)
         self.fc2 = nn.Linear(30, 15)
         self.fc3 = nn.Linear(15,10)
 
-        # self.TCONV5_2 = TCONV(32, 2, 512, 512, 2,
-        #                       0, 2, 4, 64)
-        # self.TCONV5_1 = TCONV(32, 4, 512, 512, 1,
-        #                       0, 1, 4, 64)
-        #
-        # self.TCONV4_2 = TCONV(64, 4, 512, 512, 2,
-        #                       0, 2, 8, 128)
-        # self.TCONV4_1 = TCONV(64, 8, 512, 256, 1,
-        #                       0, 1, 8, 128)
-        #
-        # self.TCONV3_2 = TCONV(128, 8, 256, 256, 2,
-        #                       0, 2, 16, 256)
-        # self.TCONV3_1 = TCONV(128, 16, 256, 128, 1,
-        #                       0, 1, 16, 256)
-        # self.TCONV2_2 = TCONV(256, 16, 128, 128, 2,
-        #                       0, 2, 32, 512)
-        # self.TCONV1_2 = TCONV(512, 32, 64, 64, 2,
-        #                       0, 2, 64, 512)
-        # self.TCONV1_1 = FCONV(512, 64, 64, 3, 1,
-        #                       0, 1)
+        self.TCONV5_2 = TCONV(32, 2, 512, 512, 2,
+                              0, 2, 4, 64)
+        self.TCONV5_1 = TCONV(32, 4, 512, 512, 1,
+                              0, 1, 4, 64)
+
+        self.TCONV4_2 = TCONV(64, 4, 512, 512, 2,
+                              0, 2, 8, 128)
+        self.TCONV4_1 = TCONV(64, 8, 512, 256, 1,
+                              0, 1, 8, 128)
+
+        self.TCONV3_2 = TCONV(128, 8, 256, 256, 2,
+                              0, 2, 16, 256)
+        self.TCONV3_1 = TCONV(128, 16, 256, 128, 1,
+                              0, 1, 16, 256)
+        self.TCONV2_2 = TCONV(256, 16, 128, 128, 2,
+                              0, 2, 32, 512)
+        self.TCONV1_2 = TCONV(512, 32, 64, 64, 2,
+                              0, 2, 64, 512)
+        self.TCONV1_1 = FCONV(512, 64, 64, 3, 1,
+                              0, 1)
+
+
+        # self.decoder32_1 = nn.Sequential(
+        #     nn.PReLU(),
+        #     nn.ConvTranspose2d(32, 512, kernel_size=2, padding=0, stride=2),  # (w-k+2p)/s+1
+        #     nn.BatchNorm2d(512, affine=False),
+        # )
+        # self.decoder32_2 = nn.Sequential(
+        #     nn.PReLU(),
+        #     nn.ConvTranspose2d(512, 512, kernel_size=1, padding=0, stride=1),  # (w-k+2p)/s+1
+        #     nn.BatchNorm2d(512, affine=False),
+        # )
+        # self.decoder16_1 = nn.Sequential(
+        #     nn.PReLU(),
+        #     nn.ConvTranspose2d(16, 256, kernel_size=2, padding=0, stride=2),  # (w-k+2p)/s+1
+        #     nn.BatchNorm2d(512, affine=False),
+        # )
+        # self.decoder16_2 = nn.Sequential(
+        #     nn.PReLU(),
+        #     nn.ConvTranspose2d(256, 256, kernel_size=3, padding=1, stride=1),  # (w-k+2p)/s+1
+        #     nn.BatchNorm2d(256, affine=False),
+        # )
+        # self.decoder8_1 = nn.Sequential(
+        #     nn.PReLU(),
+        #     nn.ConvTranspose2d(8, 128, kernel_size=2, padding=0, stride=2),  # (w-k+2p)/s+1
+        #     nn.BatchNorm2d(512, affine=False),
+        # )
+        # self.decoder8_2 = nn.Sequential(
+        #     nn.PReLU(),
+        #     nn.ConvTranspose2d(8, 128, kernel_size=3, padding=1, stride=1),  # (w-k+2p)/s+1
+        #     nn.BatchNorm2d(256, affine=False),
+        # )
 
         # if 2 in self.lasts:
         #     self.arms32 = nn.ModuleList([
@@ -550,50 +582,45 @@ class Network_Multi_Path_Infer(nn.Module):
         # predict_test8 = F.log_softmax(self.classifier8(latent_mu), dim=1)
         yh8 = self.one_hot8(label_en)
 
-        qmu5_1 = None
-        qvar5_1 = None
-        qmu4_1 = None
-        qvar4_1 = None
-
 
         # Simple decoder
-        out32 = outputs32
-        # print(out32.shape)
-        out16 = F.interpolate(self.refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
-        out16 = self.refine32[1](torch.cat([out16, outputs16], dim=1))
-        out8 = F.interpolate(self.refine16[0](out16), scale_factor=2, mode="bilinear", align_corners=True)
-        out8 = self.refine16[1](torch.cat([out8, outputs8], dim=1))
-        out4 = F.interpolate(self.refine8[0](out8), scale_factor=2, mode="bilinear", align_corners=True)
-        out2 = F.interpolate(self.refine4[0](out4), scale_factor=2, mode="bilinear", align_corners=True)
-        out1 = F.interpolate(self.refine2[0](out2), scale_factor=2, mode="bilinear", align_corners=True)
-        reconstructed = self.reconstruct[0](self.refine1[0](out1))
+        # out32 = outputs32
+        # # print(out32.shape)
+        # out16 = F.interpolate(self.refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
+        # out16 = self.refine32[1](torch.cat([out16, outputs16], dim=1))
+        # out8 = F.interpolate(self.refine16[0](out16), scale_factor=2, mode="bilinear", align_corners=True)
+        # out8 = self.refine16[1](torch.cat([out8, outputs8], dim=1))
+        # out4 = F.interpolate(self.refine8[0](out8), scale_factor=2, mode="bilinear", align_corners=True)
+        # out2 = F.interpolate(self.refine4[0](out4), scale_factor=2, mode="bilinear", align_corners=True)
+        # out1 = F.interpolate(self.refine2[0](out2), scale_factor=2, mode="bilinear", align_corners=True)
+        # reconstructed = self.reconstruct[0](self.refine1[0](out1))
 
         # structural ladder structure
-        # dec5_1, mu_dn5_1, var_dn5_1 = self.TCONV5_2.decode(latent32)
-        # prec_up5_1 = latent_var16 ** (-1)
-        # prec_dn5_1 = var_dn5_1 ** (-1)
-        # qmu5_1 = (latent_mu16 * prec_up5_1 + mu_dn5_1 * prec_dn5_1) / (prec_up5_1 + prec_dn5_1)
-        # qvar5_1 = (prec_up5_1 + prec_dn5_1) ** (-1)
-        # de_latent5_1 = sample_gaussian(qmu5_1, qvar5_1)
+        dec5_1, mu_dn5_1, var_dn5_1 = self.TCONV5_2.decode(latent32)
+        prec_up5_1 = latent_var16 ** (-1)
+        prec_dn5_1 = var_dn5_1 ** (-1)
+        qmu5_1 = (latent_mu16 * prec_up5_1 + mu_dn5_1 * prec_dn5_1) / (prec_up5_1 + prec_dn5_1)
+        qvar5_1 = (prec_up5_1 + prec_dn5_1) ** (-1)
+        de_latent5_1 = sample_gaussian(qmu5_1, qvar5_1)
 
 
-        # dec4_1, mu_dn4_1, var_dn4_1 = self.TCONV4_2.decode(de_latent5_1)
-        # prec_up4_1 = latent_var8 ** (-1)
-        # prec_dn4_1 = var_dn4_1 ** (-1)
-        # qmu4_1 = (latent_mu8 * prec_up4_1 + mu_dn4_1 * prec_dn4_1) / (prec_up4_1 + prec_dn4_1)
-        # qvar4_1 = (prec_up4_1 + prec_dn4_1) ** (-1)
-        # de_latent4_1 = sample_gaussian(qmu4_1, qvar4_1)
-        #
-        # dec3_1, mu_dn3_1, var_dn3_1 = self.TCONV3_2.decode(de_latent4_1)
-        # de_latent3_1 = sample_gaussian(mu_dn3_1, var_dn3_1)
-        #
-        # dec2_1, mu_dn2_1, var_dn2_1 = self.TCONV2_2.decode(de_latent3_1)
-        # de_latent2_1 = sample_gaussian(mu_dn2_1, var_dn2_1)
-        # dec1_1, mu_dn1_1, var_dn1_1 = self.TCONV1_2.decode(de_latent2_1)
-        # de_latent1_1 = sample_gaussian(mu_dn1_1, var_dn1_1)
-        # # print(dec1_1.shape)
-        # # print(de_latent1_1.shape)
-        # reconstructed = self.TCONV1_1.final_decode(de_latent1_1)
+        dec4_1, mu_dn4_1, var_dn4_1 = self.TCONV4_2.decode(de_latent5_1)
+        prec_up4_1 = latent_var8 ** (-1)
+        prec_dn4_1 = var_dn4_1 ** (-1)
+        qmu4_1 = (latent_mu8 * prec_up4_1 + mu_dn4_1 * prec_dn4_1) / (prec_up4_1 + prec_dn4_1)
+        qvar4_1 = (prec_up4_1 + prec_dn4_1) ** (-1)
+        de_latent4_1 = sample_gaussian(qmu4_1, qvar4_1)
+
+        dec3_1, mu_dn3_1, var_dn3_1 = self.TCONV3_2.decode(de_latent4_1)
+        de_latent3_1 = sample_gaussian(mu_dn3_1, var_dn3_1)
+
+        dec2_1, mu_dn2_1, var_dn2_1 = self.TCONV2_2.decode(de_latent3_1)
+        de_latent2_1 = sample_gaussian(mu_dn2_1, var_dn2_1)
+        dec1_1, mu_dn1_1, var_dn1_1 = self.TCONV1_2.decode(de_latent2_1)
+        de_latent1_1 = sample_gaussian(mu_dn1_1, var_dn1_1)
+        # print(dec1_1.shape)
+        # print(de_latent1_1.shape)
+        reconstructed = self.TCONV1_1.final_decode(de_latent1_1)
 
 
 

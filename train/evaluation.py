@@ -22,14 +22,17 @@ def revise(epoch):
     rec_mean = np.mean(train_rec)
     rec_std = np.std(train_rec)
     rec_thres = rec_mean + 2 * rec_std #95%
+    # rec_thres2 = rec_mean - 2 * rec_std
     print("The threhold of reconstruction error is: {}".format(rec_thres))
 
     val_dataset = "cifar10"
     cifar100_rec = np.loadtxt('{}_fea/{}_re_loss.txt'.format("val",val_dataset))
     cifar100_pre = np.loadtxt('{}_fea/{}_pred.txt'.format("val",val_dataset))
     print(sum(cifar100_rec > rec_thres))
-    print(cifar100_pre.shape)
+    # print(sum(cifar100_rec < rec_thres2))
+    # print(cifar100_pre.shape)
     cifar100_pre[(cifar100_rec > rec_thres)] = args.num_class
+    # cifar100_pre[(cifar100_rec < rec_thres2)] = args.num_class
     open('{}_fea/{}_pred.txt'.format("val", val_dataset), 'w').close()  # clear
     np.savetxt('{}_fea/{}_pred.txt'.format("val",val_dataset), cifar100_pre, delimiter=' ', fmt='%d')
 
@@ -75,6 +78,7 @@ class GAU(object):
         testfea = np.loadtxt(testsetlist[0])
         testtar = np.loadtxt(testsetlist[1])
         testpre = np.loadtxt(testsetlist[2])
+        testtar = np.full(testtar.shape, args.num_class)
 
         labelnum = self.labelnum
         gau = self.gau
