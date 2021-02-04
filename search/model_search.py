@@ -62,6 +62,83 @@ def kl_normal(qm, qv, pm, pv, yh):
 	#print("log var1", qv)
 	return kl
 
+class TCONV(nn.Module):
+    def __init__(self, in_size, unflat_dim, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride, out_dim, t_latent_dim, outpadding = 0):
+        super(TCONV, self).__init__()
+        self.in_size = in_size
+        self.unflat_dim = unflat_dim
+        self.t_in_ch = t_in_ch
+        self.t_out_ch = t_out_ch
+        self.t_kernel = t_kernel
+        self.t_stride = t_stride
+        self.t_padding = t_padding
+        self.out_dim = out_dim
+        self.t_latent_dim = t_latent_dim
+        self.weight = 1
+        self.bias = 0
+        self.outpadding = outpadding
+
+        self.fc = nn.Linear(in_size, t_in_ch * unflat_dim * unflat_dim)
+        self.net = nn.Sequential(
+
+            nn.ConvTranspose2d(t_in_ch, t_out_ch, kernel_size=t_kernel, padding=t_padding, stride=t_stride, output_padding=self.outpadding),  # (w-k+2p)/s+1
+            nn.BatchNorm2d(t_out_ch),
+            nn.LeakyReLU(),
+        )
+        self.mean_layer = nn.Sequential(
+            nn.Linear(t_out_ch*out_dim*out_dim, t_latent_dim)
+        )
+        self.var_layer = nn.Sequential(
+            nn.Linear(t_out_ch*out_dim*out_dim, t_latent_dim)
+        )
+
+    def decode(self, x):
+        x = self.fc(x)
+        x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
+        # print(x.shape)
+        h = self.net(x)
+        # print(h.shape)
+        h_flat = h.view(-1, self.t_out_ch * self.out_dim * self.out_dim)
+        mu, var = self.mean_layer(h_flat), self.var_layer(h_flat)
+        var = F.softplus(var) + 1e-8
+        # mu, var = ut.gaussian_parameters(h, dim=1)
+        return h, mu, var
+
+    def decode2(self, x):
+        h = self.net(x)
+        return h
+
+
+class FCONV(nn.Module):
+    def __init__(self, in_size, unflat_dim, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride):
+        super(FCONV, self).__init__()
+        self.in_size = in_size
+        self.unflat_dim = unflat_dim
+        self.t_in_ch = t_in_ch
+        self.t_out_ch = t_out_ch
+        self.t_kernel = t_kernel
+        self.t_stride = t_stride
+        self.t_padding = t_padding
+
+        self.fc_final = nn.Linear(in_size, t_in_ch * unflat_dim * unflat_dim)
+        self.final = nn.Sequential(
+            # nn.PReLU(),
+            nn.ConvTranspose2d(t_in_ch, t_out_ch, kernel_size=t_kernel, padding=t_padding, stride=t_stride),  # (w-k+2p)/s+1
+            #nn.Sigmoid()
+            nn.Tanh()
+        )
+
+    def final_decode(self,x):
+        x = self.fc_final(x)
+        x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
+        x_re = self.final(x)
+        return x_re
+    def final_decode2(self,x):
+        # x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
+        x_re = self.final(x)
+        return x_re
+
+
 class MixedOp(nn.Module):
 
     def __init__(self, C_in, C_out, stride=1, width_mult_list=[1.]):
@@ -252,39 +329,35 @@ class Network_Multi_Path(nn.Module):
             self.cells.append(cells)
 
 
-        self.refine32 = nn.ModuleList([
-            nn.ModuleList([
-                ConvNorm(self.num_filters(32, head_ratio), self.num_filters(16, head_ratio), kernel_size=1, bias=False, groups=1, slimmable=False),
-                ConvNorm(self.num_filters(32, head_ratio), self.num_filters(16, head_ratio), kernel_size=3, padding=1, bias=False, groups=1, slimmable=False),
-                ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=1, bias=False, groups=1, slimmable=False),
-                ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=3, padding=1, bias=False, groups=1, slimmable=False)]) for _, head_ratio in self._stem_head_width ])
-        self.refine16 = nn.ModuleList([
-            nn.ModuleList([
-                ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=1, bias=False, groups=1, slimmable=False),
-                ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=3, padding=1, bias=False, groups=1, slimmable=False)]) for _, head_ratio in self._stem_head_width ])
-        self.refine8 = nn.ModuleList([
-                ConvNorm(self.num_filters(8, head_ratio), self.num_filters(4, head_ratio), kernel_size=3,
-                                padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
+        # self.refine32 = nn.ModuleList([
+        #     nn.ModuleList([
+        #         ConvNorm(self.num_filters(32, head_ratio), self.num_filters(16, head_ratio), kernel_size=1, bias=False, groups=1, slimmable=False),
+        #         ConvNorm(self.num_filters(32, head_ratio), self.num_filters(16, head_ratio), kernel_size=3, padding=1, bias=False, groups=1, slimmable=False),
+        #         ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=1, bias=False, groups=1, slimmable=False),
+        #         ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=3, padding=1, bias=False, groups=1, slimmable=False)]) for _, head_ratio in self._stem_head_width ])
+        # self.refine16 = nn.ModuleList([
+        #     nn.ModuleList([
+        #         ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=1, bias=False, groups=1, slimmable=False),
+        #         ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=3, padding=1, bias=False, groups=1, slimmable=False)]) for _, head_ratio in self._stem_head_width ])
         # self.refine8 = nn.ModuleList([
-        #     ConvNorm(self.num_filters(8, head_ratio) * 3, self.num_filters(4, head_ratio), kernel_size=3,
+        #         ConvNorm(self.num_filters(8, head_ratio), self.num_filters(4, head_ratio), kernel_size=3,
+        #                         padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
+        # # self.refine8 = nn.ModuleList([
+        # #     ConvNorm(self.num_filters(8, head_ratio) * 3, self.num_filters(4, head_ratio), kernel_size=3,
+        # #              padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
+        # self.refine4 = nn.ModuleList([
+        #         ConvNorm(self.num_filters(4, head_ratio), self.num_filters(2, head_ratio), kernel_size=3,
+        #                         padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
+        # self.refine2 = nn.ModuleList([
+        #         ConvNorm(self.num_filters(2, head_ratio), self.num_filters(1, head_ratio), kernel_size=3,
+        #                         padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
+        # self.refine1 = nn.ModuleList([
+        #     ConvNorm(self.num_filters(1, head_ratio), self.num_filters(1, head_ratio), kernel_size=3,
         #              padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-        self.refine4 = nn.ModuleList([
-                ConvNorm(self.num_filters(4, head_ratio), self.num_filters(2, head_ratio), kernel_size=3,
-                                padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-        self.refine2 = nn.ModuleList([
-                ConvNorm(self.num_filters(2, head_ratio), self.num_filters(1, head_ratio), kernel_size=3,
-                                padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-        self.refine1 = nn.ModuleList([
-            ConvNorm(self.num_filters(1, head_ratio), self.num_filters(1, head_ratio), kernel_size=3,
-                     padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-        self.reconstruct = nn.ModuleList([
-                ConvNorm(self.num_filters(1, head_ratio), 3, kernel_size=3,
-                                padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-        # self.head0 = nn.ModuleList([ Head(self.num_filters(8, head_ratio), num_classes, False) for _, head_ratio in self._stem_head_width ])
-        # self.head1 = nn.ModuleList([ Head(self.num_filters(8, head_ratio), num_classes, False) for _, head_ratio in self._stem_head_width ])
-        # self.head2 = nn.ModuleList([ Head(self.num_filters(8, head_ratio), num_classes, False) for _, head_ratio in self._stem_head_width ])
-        # self.head02 = nn.ModuleList([ Head(self.num_filters(8, head_ratio)*2, num_classes, False) for _, head_ratio in self._stem_head_width ])
-        # self.head12 = nn.ModuleList([ Head(self.num_filters(8, head_ratio)*2, num_classes, False) for _, head_ratio in self._stem_head_width ])
+        # self.reconstruct = nn.ModuleList([
+        #         ConvNorm(self.num_filters(1, head_ratio), 3, kernel_size=3,
+        #                         padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
+
 
         # contains arch_param names: {"alphas": alphas, "betas": betas, "ratios": ratios}
         self._arch_names = []
@@ -296,6 +369,36 @@ class Network_Multi_Path(nn.Module):
             self._reset_arch_parameters(i)
         # switch set of arch if we have more than 1 arch
         self.arch_idx = 0
+
+        self.fc1 = nn.Linear(30, 30)
+        self.fc2 = nn.Linear(30, 15)
+        self.fc3 = nn.Linear(15, 10)
+
+        self.TCONV5_2 = TCONV(self.latent_dim32, 2, 512, 512, 2,
+                              0, 2, 4, self.latent_dim64)
+        # self.TCONV5_1 = TCONV(32, 4, 512, 512, 1,
+        #                       0, 1, 4, 64)
+
+        self.TCONV4_2 = TCONV(self.latent_dim64, 4, 512, 512, 2,
+                              0, 2, 8, self.latent_dim128)
+        # self.TCONV4_1 = TCONV(64, 8, 512, 256, 1,
+        #                       0, 1, 8, 128)
+
+        # self.TCONV3_2 = TCONV(128, 8, 256, 256, 2,
+        #                       0, 2, 16, 256)
+        self.TCONV3_2 = FCONV(self.latent_dim128, 8, 256, 256, 2, 0, 2)
+        # self.TCONV3_1 = TCONV(128, 16, 256, 128, 1,
+        #                       0, 1, 16, 256)
+        # self.TCONV2_2 = TCONV(256, 16, 128, 128, 2,
+        #                       0, 2, 32, 512)
+        self.TCONV2_2 = FCONV(256, 16, 256, 128, 2,
+                              0, 2)
+        # self.TCONV1_2 = TCONV(512, 32, 64, 64, 2,
+        #                       0, 2, 64, 512)
+        self.TCONV1_2 = FCONV(512, 32, 128, 64, 2,
+                              0, 2)
+        self.TCONV1_1 = FCONV(512, 64, 64, 3, 1,
+                              0, 1)
     
     def num_filters(self, scale, width=1.0):
         return int(np.round(scale * self._Fch * width))
@@ -364,18 +467,14 @@ class Network_Multi_Path(nn.Module):
         # out_prev: cell-state
         # index 0: keep; index 1: down
         stem = self.stem[self.arch_idx]
-        refine16 = self.refine16[self.arch_idx]
-        refine32 = self.refine32[self.arch_idx]
-        refine8 = self.refine8[self.arch_idx]
-        refine4 = self.refine4[self.arch_idx]
-        refine2 = self.refine2[self.arch_idx]
-        refine1 = self.refine1[self.arch_idx]
-        reconstruct = self.reconstruct[self.arch_idx]
-        # head0 = self.head0[self.arch_idx]
-        # head1 = self.head1[self.arch_idx]
-        # head2 = self.head2[self.arch_idx]
-        # head02 = self.head02[self.arch_idx]
-        # head12 = self.head12[self.arch_idx]
+        # refine16 = self.refine16[self.arch_idx]
+        # refine32 = self.refine32[self.arch_idx]
+        # refine8 = self.refine8[self.arch_idx]
+        # refine4 = self.refine4[self.arch_idx]
+        # refine2 = self.refine2[self.arch_idx]
+        # refine1 = self.refine1[self.arch_idx]
+        # reconstruct = self.reconstruct[self.arch_idx]
+
 
         alphas0 = F.softmax(getattr(self, self._arch_names[self.arch_idx]["alphas"][0]), dim=-1)
         alphas1 = F.softmax(getattr(self, self._arch_names[self.arch_idx]["alphas"][1]), dim=-1)
@@ -477,62 +576,46 @@ class Network_Multi_Path(nn.Module):
         # predict_test8 = F.log_softmax(self.classifier8(latent_mu), dim=1)
         yh8 = self.one_hot8(label_en)
 
-        # out0 = out[0][0]
-        # out1 = F.interpolate(refine16[0](out[1][0]), scale_factor=2, mode='bilinear', align_corners=True)
-        # out1 = refine16[1](torch.cat([out1, out[0][0]], dim=1))
-        # out2 = F.interpolate(refine32[0](out[2][0]), scale_factor=2, mode='bilinear', align_corners=True)
-        # out2 = refine32[1](torch.cat([out2, out[1][0]], dim=1))
-        # out2 = F.interpolate(refine32[2](out2), scale_factor=2, mode='bilinear', align_corners=True)
-        # out2 = refine32[3](torch.cat([out2, out[0][0]], dim=1))
 
-        # concat adjacent layers to get final reconstructed image
-        out32 = out[2][0]
-        out16 = F.interpolate(refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
-        out16 = refine32[1](torch.cat([out16, out[1][0]], dim=1))
-        out8 = F.interpolate(refine16[0](out16), scale_factor=2, mode="bilinear", align_corners=True)
-        out8 = refine16[1](torch.cat([out8, out[0][0]], dim=1))
-        out4 = F.interpolate(refine8(out8), scale_factor=2, mode="bilinear", align_corners=True)
-        out2 = F.interpolate(refine4(out4), scale_factor=2, mode="bilinear", align_corners=True)
-        out1 = F.interpolate(refine2(out2), scale_factor=2, mode="bilinear", align_corners=True)
-        reconstructed = reconstruct(refine1(out1))
+        qmu5_1 = None
+        qvar5_1 = None
+        qmu4_1 = None
+        qvar4_1 = None
 
-        # upsample each layer to downsample 8 and concat to get final reconstructed image
-        # out32 = out[2][0]
-        # out32_16 = F.interpolate(refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
-        # out32_8 = F.interpolate(refine32[2](out32_16), scale_factor=2, mode="bilinear", align_corners=True)
-        # out16 = out[1][0]
-        # out16_8 = F.interpolate(refine16[0](out16), scale_factor=2, mode="bilinear", align_corners=True)
-        # out8 = out[0][0]
-        # out4 = F.interpolate(refine8(torch.cat([out32_8, out16_8, out8], dim=1)), scale_factor=2, mode="bilinear", align_corners=True)
-        # out2 = F.interpolate(refine4(out4), scale_factor=2, mode="bilinear", align_corners=True)
-        # out1 = F.interpolate(refine2(out2), scale_factor=2, mode="bilinear", align_corners=True)
-        # reconstructed = reconstruct(refine1(out1))
+        # structural ladder structure
+        dec5_1, mu_dn5_1, var_dn5_1 = self.TCONV5_2.decode(latent32)
+        prec_up5_1 = latent_var16 ** (-1)
+        prec_dn5_1 = var_dn5_1 ** (-1)
+        qmu5_1 = (latent_mu16 * prec_up5_1 + mu_dn5_1 * prec_dn5_1) / (prec_up5_1 + prec_dn5_1)
+        qvar5_1 = (prec_up5_1 + prec_dn5_1) ** (-1)
+        de_latent5_1 = sample_gaussian(qmu5_1, qvar5_1)
 
+        dec4_1, mu_dn4_1, var_dn4_1 = self.TCONV4_2.decode(de_latent5_1)
+        prec_up4_1 = latent_var8 ** (-1)
+        prec_dn4_1 = var_dn4_1 ** (-1)
+        qmu4_1 = (latent_mu8 * prec_up4_1 + mu_dn4_1 * prec_dn4_1) / (prec_up4_1 + prec_dn4_1)
+        qvar4_1 = (prec_up4_1 + prec_dn4_1) ** (-1)
+        de_latent4_1 = sample_gaussian(qmu4_1, qvar4_1)
 
-        # out32 = out[2][0]
-        # out32_16 = F.interpolate(refine32[0](out32), scale_factor=2, mode="bilinear", align_corners=True)
-        # out32_8 = F.interpolate(refine16[0](out32_16), scale_factor=2, mode="bilinear", align_corners=True)
+        dec3_1 = self.TCONV3_2.final_decode(de_latent4_1)
+        # print(dec3_1.shape)
+        dec2_1 = self.TCONV2_2.final_decode2(dec3_1)
+        # print(dec2_1.shape)
+        dec1_1 = self.TCONV1_2.final_decode2(dec2_1)
+        # print(dec1_1.shape)
+        reconstructed = self.TCONV1_1.final_decode2(dec1_1)
+        # print(reconstructed.shape)
+
+        pred_final = F.log_softmax(self.fc3(self.fc2(self.fc1(torch.cat((predict8, predict16, predict32), dim=1)))),
+                                   dim=1)
 
 
         latent_mu = [latent_mu32,latent_mu16,latent_mu8]
         latent_var = [latent_var32,latent_var16,latent_var8]
         yh = [yh32,yh16,yh8]
-        predict = [predict32,predict16,predict8]
+        predict = [predict32,predict16,predict8, pred_final]
 
-        #
-        # pred0 = head0(out0)
-        # pred1 = head1(out1)
-        # pred2 = head2(out2)
-        # pred02 = head02(torch.cat([out0, out2], dim=1))
-        # pred12 = head12(torch.cat([out1, out2], dim=1))
-
-        # if not self.training:
-        #     pred0 = F.interpolate(pred0, scale_factor=8, mode='bilinear', align_corners=True)
-        #     pred1 = F.interpolate(pred1, scale_factor=8, mode='bilinear', align_corners=True)
-        #     pred2 = F.interpolate(pred2, scale_factor=8, mode='bilinear', align_corners=True)
-        #     pred02 = F.interpolate(pred02, scale_factor=8, mode='bilinear', align_corners=True)
-        #     pred12 = F.interpolate(pred12, scale_factor=8, mode='bilinear', align_corners=True)
-        return latent_mu, latent_var, yh, predict, reconstructed
+        return latent_mu, latent_var, yh, predict, reconstructed, [qmu5_1, qvar5_1], [qmu4_1, qvar4_1]
         ###################################
     
     def forward_latency(self, size, alpha=True, beta=True, ratio=True):
@@ -665,58 +748,153 @@ class Network_Multi_Path(nn.Module):
             self.prun_mode = None
             for idx in range(len(self._arch_names)):
                 self.arch_idx = idx
-                mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
+                latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
                 re_loss = re_loss + reconstruction_function(input, reconstructed)
-                for i in range(3):
-                    pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
-                    ce_loss = ce_loss + nllloss(predict[i], target)
-                    kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
+
+                if up32[0] != None:
+                    # for i in range(3):
+                    #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
+                    ce_loss = ce_loss + nllloss(predict[-1], target)
+                    for i in range(3):
+                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+                    # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
+                    # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
+                    kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
+                    kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
+                    kl_loss = kl_loss + kl16
+                    kl_loss = kl_loss + kl8
+                else:
+                    for i in range(3):
+                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
         if len(self._width_mult_list) > 1:
             self.prun_mode = "max"
-            mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
+            latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
             re_loss = re_loss + reconstruction_function(input, reconstructed)
-            # print(predict[1].shape)
-            for i in range(3):
-                pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
-                ce_loss = ce_loss + nllloss(predict[i], target)
-                kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
+            if up32[0] != None:
+                # for i in range(3):
+                #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
+                ce_loss = ce_loss + nllloss(predict[-1], target)
+                for i in range(3):
+                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+                # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
+                # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
+                kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
+                kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
+                kl_loss = kl_loss + kl16
+                kl_loss = kl_loss + kl8
+            else:
+                for i in range(3):
+                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+
             self.prun_mode = "min"
-            mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
+            latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
             re_loss = re_loss + reconstruction_function(input, reconstructed)
-            for i in range(3):
-                pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
-                ce_loss = ce_loss + nllloss(predict[i], target)
-                kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
+            if up32[0] != None:
+                # for i in range(3):
+                #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
+                ce_loss = ce_loss + nllloss(predict[-1], target)
+                for i in range(3):
+                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+                # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
+                # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
+                kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
+                kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
+                kl_loss = kl_loss + kl16
+                kl_loss = kl_loss + kl8
+            else:
+                for i in range(3):
+                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
             if pretrain == True:
                 self.prun_mode = "random"
-                mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
+                latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
                 re_loss = re_loss + reconstruction_function(input, reconstructed)
-                for i in range(3):
-                    pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
-                    ce_loss = ce_loss + nllloss(predict[i], target)
-                    kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
+                if up32[0] != None:
+                    # for i in range(3):
+                    #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
+                    ce_loss = ce_loss + nllloss(predict[-1], target)
+                    for i in range(3):
+                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+                    # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
+                    # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
+                    kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
+                    kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
+                    kl_loss = kl_loss + kl16
+                    kl_loss = kl_loss + kl8
+                else:
+                    for i in range(3):
+                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
                 self.prun_mode = "random"
-                mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
+                latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
                 re_loss = re_loss + reconstruction_function(input, reconstructed)
-                for i in range(3):
-                    pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
-                    ce_loss = ce_loss + nllloss(predict[i], target)
-                    kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
+                if up32[0] != None:
+                    # for i in range(3):
+                    #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
+                    ce_loss = ce_loss + nllloss(predict[-1], target)
+                    for i in range(3):
+                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+                    # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
+                    # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
+                    kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
+                    kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
+                    kl_loss = kl_loss + kl16
+                    kl_loss = kl_loss + kl8
+                else:
+                    for i in range(3):
+                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
         elif pretrain == True and len(self._width_mult_list) == 1:
             self.prun_mode = "max"
-            mu_latent, var_latent, yh, predict, reconstructed = self._forward(input, target, target_de)
+            latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
             re_loss = re_loss + reconstruction_function(input, reconstructed)
-            for i in range(3):
-                pm, pv = torch.zeros(mu_latent[i].shape).cuda(), torch.ones(var_latent[i].shape).cuda()
-                ce_loss = ce_loss + nllloss(predict[i], target)
-                kl_loss = kl_loss + kl_normal(mu_latent[i], var_latent[i], pm, pv, yh[i])
+            if up32[0] != None:
+                # for i in range(3):
+                #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
+                ce_loss = ce_loss + nllloss(predict[-1], target)
+                for i in range(3):
+                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+                # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
+                # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
+                kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
+                kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
+                kl_loss = kl_loss + kl16
+                kl_loss = kl_loss + k8
+
+            else:
+                for i in range(3):
+                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
+                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
         # print("The reconstruction loss is: {}".format(theta * re_loss))
         # print("The cross entropy loss is: {}".format(lamda * ce_loss))
         # print("The kl divergence loss is: {}".format(beta * kl_loss))
         # loss = torch.mean(theta * re_loss + lamda * ce_loss + beta * kl_loss)
         # loss = ce_loss
         self.prun_mode = "random"
-        _, _, _, predict, _ = self._forward(input, target, target_de)
+        _, _, _, predict, _, _, _ = self._forward(input, target, target_de)
+        # print("ce_loss: {}".format(ce_loss.shape))
+        # print("re_loss: {}".format(re_loss.shape))
+        # print("kl_loss: {}".format(kl_loss.shape))
         return ce_loss, re_loss, torch.mean(kl_loss), predict
 
     def _build_arch_parameters(self, idx):

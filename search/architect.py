@@ -47,6 +47,9 @@ class Architect(object):
                 loss = self._backward_step_unrolled(input_train, target_train, target_train_de, input_valid, target_valid, target_valid_de, eta, network_optimizer)
         else:
                 ce_loss, re_loss, kl_loss = self._backward_step(input_valid, target_valid, target_valid_de)
+                # print(ce_loss.shape)
+                # print(re_loss.shape)
+                # print(kl_loss.shape)
                 loss = ce_loss + re_loss + kl_loss
         loss = torch.mean(loss)
         loss.backward()
@@ -119,12 +122,14 @@ class Architect(object):
         R = r / _concat(vector).norm()
         for p, v in zip(self.model.parameters(), vector):
             p.data.add_(R, v)
-        loss = self.model(input, target, target_de)
+        ce_loss, re_loss, kl_loss, _ = self.model(input, target, target_de)
+        loss = ce_loss + re_loss + kl_loss
         grads_p = torch.autograd.grad(loss[:-1], self.model.arch_parameters())
 
         for p, v in zip(self.model.parameters(), vector):
             p.data.sub_(2*R, v)
-        loss = self.model(input, target, target_de)
+        ce_loss, re_loss, kl_loss, _ = self.model(input, target, target_de)
+        loss = ce_loss + re_loss + kl_loss
         grads_n = torch.autograd.grad(loss[:-1], self.model.arch_parameters())
 
         for p, v in zip(self.model.parameters(), vector):

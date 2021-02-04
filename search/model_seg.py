@@ -77,7 +77,7 @@ class FCONV(nn.Module):
             nn.PReLU(),
             nn.ConvTranspose2d(t_in_ch, t_out_ch, kernel_size=t_kernel, padding=t_padding, stride=t_stride),  # (w-k+2p)/s+1
             #nn.Sigmoid()
-            # nn.Tanh()
+            nn.Tanh()
         )
 
     def final_decode(self,x):
@@ -416,51 +416,6 @@ class Network_Multi_Path_Infer(nn.Module):
                               0, 1)
 
 
-        # self.decoder32_1 = nn.Sequential(
-        #     nn.PReLU(),
-        #     nn.ConvTranspose2d(32, 512, kernel_size=2, padding=0, stride=2),  # (w-k+2p)/s+1
-        #     nn.BatchNorm2d(512, affine=False),
-        # )
-        # self.decoder32_2 = nn.Sequential(
-        #     nn.PReLU(),
-        #     nn.ConvTranspose2d(512, 512, kernel_size=1, padding=0, stride=1),  # (w-k+2p)/s+1
-        #     nn.BatchNorm2d(512, affine=False),
-        # )
-        # self.decoder16_1 = nn.Sequential(
-        #     nn.PReLU(),
-        #     nn.ConvTranspose2d(16, 256, kernel_size=2, padding=0, stride=2),  # (w-k+2p)/s+1
-        #     nn.BatchNorm2d(512, affine=False),
-        # )
-        # self.decoder16_2 = nn.Sequential(
-        #     nn.PReLU(),
-        #     nn.ConvTranspose2d(256, 256, kernel_size=3, padding=1, stride=1),  # (w-k+2p)/s+1
-        #     nn.BatchNorm2d(256, affine=False),
-        # )
-        # self.decoder8_1 = nn.Sequential(
-        #     nn.PReLU(),
-        #     nn.ConvTranspose2d(8, 128, kernel_size=2, padding=0, stride=2),  # (w-k+2p)/s+1
-        #     nn.BatchNorm2d(512, affine=False),
-        # )
-        # self.decoder8_2 = nn.Sequential(
-        #     nn.PReLU(),
-        #     nn.ConvTranspose2d(8, 128, kernel_size=3, padding=1, stride=1),  # (w-k+2p)/s+1
-        #     nn.BatchNorm2d(256, affine=False),
-        # )
-
-        # if 2 in self.lasts:
-        #     self.arms32 = nn.ModuleList([
-        #         ConvNorm(self.num_filters(32, self._stem_head_width[1]), self.num_filters(16, self._stem_head_width[1]), 1, 1, 0, slimmable=False),
-        #         ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]), 1, 1, 0, slimmable=False),
-        #     ])
-        #     self.refines32 = nn.ModuleList([
-        #         ConvNorm(self.num_filters(16, self._stem_head_width[1])+self.ch_16, self.num_filters(16, self._stem_head_width[1]), 3, 1, 1, slimmable=False),
-        #         ConvNorm(self.num_filters(8, self._stem_head_width[1])+self.ch_8_2, self.num_filters(8, self._stem_head_width[1]), 3, 1, 1, slimmable=False),
-        #     ])
-        # if 1 in self.lasts:
-        #     self.arms16 = ConvNorm(self.num_filters(16, self._stem_head_width[1]), self.num_filters(8, self._stem_head_width[1]), 1, 1, 0, slimmable=False)
-        #     self.refines16 = ConvNorm(self.num_filters(8, self._stem_head_width[1])+self.ch_8_1, self.num_filters(8, self._stem_head_width[1]), 3, 1, 1, slimmable=False)
-        # self.ffm = FeatureFusion(self.num_filters(8, self._stem_head_width[1]) * self._branch, self.num_filters(8, self._stem_head_width[1]) * self._branch, reduction=1, Fch=self._Fch, scale=8, branch=self._branch, norm_layer=BatchNorm2d)
-
     def get_branch_groups_cells(self, ops, paths, downs, widths, lasts):
         num_branch = len(ops)
         layers = max([len(path) for path in paths])
@@ -595,7 +550,7 @@ class Network_Multi_Path_Infer(nn.Module):
         # out1 = F.interpolate(self.refine2[0](out2), scale_factor=2, mode="bilinear", align_corners=True)
         # reconstructed = self.reconstruct[0](self.refine1[0](out1))
 
-        # structural ladder structure
+        #structural ladder structure
         dec5_1, mu_dn5_1, var_dn5_1 = self.TCONV5_2.decode(latent32)
         prec_up5_1 = latent_var16 ** (-1)
         prec_dn5_1 = var_dn5_1 ** (-1)
@@ -622,34 +577,38 @@ class Network_Multi_Path_Infer(nn.Module):
         # print(de_latent1_1.shape)
         reconstructed = self.TCONV1_1.final_decode(de_latent1_1)
 
+        # trial
+        # dec5_1, mu_dn5_1, var_dn5_1 = self.TCONV5_2.decode(latent32)
+        # de_latent5_1 = (sample_gaussian(mu_dn5_1,var_dn5_1) + sample_gaussian(latent_mu16,latent_var16))/2
+        #
+        # dec4_1, mu_dn4_1, var_dn4_1 = self.TCONV4_2.decode(de_latent5_1)
+        # de_latent4_1 = (sample_gaussian(mu_dn4_1, var_dn4_1) + sample_gaussian(latent_mu8, latent_var8)) / 2
+        #
+        # dec3_1, mu_dn3_1, var_dn3_1 = self.TCONV3_2.decode(de_latent4_1)
+        # de_latent3_1 = sample_gaussian(mu_dn3_1, var_dn3_1)
+        #
+        # dec2_1, mu_dn2_1, var_dn2_1 = self.TCONV2_2.decode(de_latent3_1)
+        # de_latent2_1 = sample_gaussian(mu_dn2_1, var_dn2_1)
+        # dec1_1, mu_dn1_1, var_dn1_1 = self.TCONV1_2.decode(de_latent2_1)
+        # de_latent1_1 = sample_gaussian(mu_dn1_1, var_dn1_1)
+        # # print(dec1_1.shape)
+        # # print(de_latent1_1.shape)
+        # reconstructed = self.TCONV1_1.final_decode(de_latent1_1)
 
 
         pred_final = F.log_softmax(self.fc3(self.fc2(self.fc1(torch.cat((predict8,predict16,predict32),dim=1)))),dim=1)
 
         return predict32, predict16, predict8, pred_final, reconstructed, \
                [latent_mu32, latent_mu16, latent_mu8], [latent_var32, latent_var16, latent_var8], [yh32, yh16, yh8], [qmu5_1,qvar5_1],[qmu4_1,qvar4_1]
-        # if len(pred32) > 0:
-        #     pred32 = self.heads32(torch.cat(pred32, dim=1))
-        # else:
-        #     pred32 = None
-        # if len(pred16) > 0:
-        #     pred16 = self.heads16(torch.cat(pred16, dim=1))
-        # else:
-        #     pred16 = None
-        # pred8 = self.heads8(self.ffm(torch.cat(pred8, dim=1)))
-        # if self.training:
-        #     return pred8, pred16, pred32
-        # else:
-        #     return pred8
+
+        # return predict32, predict16, predict8, pred_final, reconstructed, \
+        #        [latent_mu32, latent_mu16, latent_mu8], [latent_var32, latent_var16, latent_var8], [yh32, yh16, yh8], [
+        #            mu_dn5_1, var_dn5_1], [mu_dn4_1, var_dn4_1]
 
     def forward(self, input, label_en):
         _, _, H, W = input.size()
         stem = self.stem(input)
 
-        # store the last feature map w. corresponding scale of each branch
-        # outputs8 = [stem] * self._branch
-        # outputs16 = [stem] * self._branch
-        # outputs32 = [stem] * self._branch
         outputs = [stem] * self._branch
 
         for layer in range(len(self.branch_groups)):
@@ -658,9 +617,6 @@ class Network_Multi_Path_Infer(nn.Module):
                 scale = int(H // output.size(2))
                 for branch in group:
                     outputs[branch] = output
-                    # if scale == 8: outputs8[branch] = output
-                    # elif scale == 16: outputs16[branch] = output
-                    # elif scale == 32: outputs32[branch] = output
                     if scale == 8:
                         outputs8 = output
                     elif scale == 16:
@@ -668,18 +624,7 @@ class Network_Multi_Path_Infer(nn.Module):
                     elif scale == 32:
                         outputs32 = output
 
-        # if self.training:
-        #     pred8, pred16, pred32, reconstructed = self.agg_ffm(outputs8, outputs16, outputs32)
-        #     pred8 = F.interpolate(pred8, scale_factor=8, mode='bilinear', align_corners=True)
-        #     if pred16 is not None: pred16 = F.interpolate(pred16, scale_factor=16, mode='bilinear', align_corners=True)
-        #     if pred32 is not None: pred32 = F.interpolate(pred32, scale_factor=32, mode='bilinear', align_corners=True)
-        #     return pred8, pred16, pred32
-        # else:
-        #     pred8 = self.agg_ffm(outputs8, outputs16, outputs32)
-        #     out = F.interpolate(pred8, size=(int(pred8.size(2))*8, int(pred8.size(3))*8), mode='bilinear', align_corners=True)
-        output8 = outputs8.cuda()
-        output16 = outputs16.cuda()
-        output32 = outputs32.cuda()
+
         pred8, pred16, pred32, pred_final, reconstructed,\
             latent_mu, latent_var, yh, up32, up16 = self.agg_ffm(outputs8, outputs16, outputs32, label_en)
         return pred8, pred16, pred32, pred_final, reconstructed, latent_mu, latent_var, yh, up32, up16

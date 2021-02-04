@@ -539,14 +539,15 @@ from collections import OrderedDict
 OPS = {
     'skip' : lambda C_in, C_out, stride, slimmable, width_mult_list: FactorizedReduce(C_in, C_out, stride, slimmable, width_mult_list),
     'conv' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual1x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
-    'conv_downup' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual_downup_1x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
+    # 'conv_downup' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual_downup_1x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
     'conv_2x' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual2x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
-    'conv_2x_downup' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual_downup_2x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
+    # 'conv_2x_downup' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual_downup_2x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
 }
 OPS_name = ["FactorizedReduce", "BasicResidual1x", "BasicResidual_downup_1x", "BasicResidual2x", "BasicResidual_downup_2x"]
+OPS_name = ["FactorizedReduce", "BasicResidual1x", "BasicResidual2x"]
 OPS_Class = OrderedDict()
 OPS_Class['skip'] = FactorizedReduce
 OPS_Class['conv'] = BasicResidual1x
-OPS_Class['conv_downup'] = BasicResidual_downup_1x
+# OPS_Class['conv_downup'] = BasicResidual_downup_1x
 OPS_Class['conv_2x'] = BasicResidual2x
-OPS_Class['conv_2x_downup'] = BasicResidual_downup_2x
+# OPS_Class['conv_2x_downup'] = BasicResidual_downup_2x

@@ -25,7 +25,7 @@ def revise(epoch):
     # rec_thres2 = rec_mean - 2 * rec_std
     print("The threhold of reconstruction error is: {}".format(rec_thres))
 
-    val_dataset = "cifar10"
+    val_dataset = "cifar100"
     cifar100_rec = np.loadtxt('{}_fea/{}_re_loss.txt'.format("val",val_dataset))
     cifar100_pre = np.loadtxt('{}_fea/{}_pred.txt'.format("val",val_dataset))
     print(sum(cifar100_rec > rec_thres))
@@ -78,7 +78,7 @@ class GAU(object):
         testfea = np.loadtxt(testsetlist[0])
         testtar = np.loadtxt(testsetlist[1])
         testpre = np.loadtxt(testsetlist[2])
-        testtar = np.full(testtar.shape, args.num_class)
+        # testtar = np.full(testtar.shape, args.num_class)
 
         labelnum = self.labelnum
         gau = self.gau
@@ -171,12 +171,12 @@ if __name__ == '__main__':
 
         revise(epoch)
         gau = GAU(epoch)
-        cifar10 = ['val_fea/cifar10_mu32.txt', 'val_fea/cifar10_target.txt',
-                   'val_fea/cifar10_pred.txt']
+        cifar10 = ['val_fea/cifar100_mu32.txt', 'val_fea/cifar100_target.txt',
+                   'val_fea/cifar100_pred.txt']
 
         perf_cifar10 = gau.test(cifar10, args.threshold)
 
         ma = [perf_cifar10]
         # ma = [perf_omn, perf_mnist_noise, perf_noise]
         print(ma)
-        np.savetxt('val_fea/cifar10_result.txt', ma)
+        np.savetxt('val_fea/cifar100_result.txt', ma)

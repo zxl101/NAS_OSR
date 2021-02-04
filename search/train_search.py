@@ -141,13 +141,13 @@ def main(pretrain=True):
     parameters = []
     parameters += list(model.module.stem.parameters())
     parameters += list(model.module.cells.parameters())
-    parameters += list(model.module.refine32.parameters())
-    parameters += list(model.module.refine16.parameters())
-    parameters += list(model.module.refine8.parameters())
-    parameters += list(model.module.refine4.parameters())
-    parameters += list(model.module.refine2.parameters())
-    parameters += list(model.module.refine1.parameters())
-    parameters += list(model.module.reconstruct.parameters())
+    # parameters += list(model.module.refine32.parameters())
+    # parameters += list(model.module.refine16.parameters())
+    # parameters += list(model.module.refine8.parameters())
+    # parameters += list(model.module.refine4.parameters())
+    # parameters += list(model.module.refine2.parameters())
+    # parameters += list(model.module.refine1.parameters())
+    # parameters += list(model.module.reconstruct.parameters())
     parameters += list(model.module.mean_layer32.parameters())
     parameters += list(model.module.var_layer32.parameters())
     parameters += list(model.module.classifier32.parameters())
@@ -160,17 +160,27 @@ def main(pretrain=True):
     parameters += list(model.module.var_layer8.parameters())
     parameters += list(model.module.classifier8.parameters())
     parameters += list(model.module.one_hot8.parameters())
-    # parameters += list(model.head0.parameters())
-    # parameters += list(model.head1.parameters())
-    # parameters += list(model.head2.parameters())
-    # parameters += list(model.head02.parameters())
-    # parameters += list(model.head12.parameters())
-    optimizer = torch.optim.SGD(
-        parameters,
-        # model.parameters(),
-        lr=base_lr,
-        momentum=config.momentum,
-        weight_decay=config.weight_decay)
+    parameters += list(model.module.fc1.parameters())
+    parameters += list(model.module.fc2.parameters())
+    parameters += list(model.module.fc3.parameters())
+    parameters += list(model.module.TCONV5_2.parameters())
+    # parameters += list(model.module.TCONV5_1.parameters())
+    parameters += list(model.module.TCONV4_2.parameters())
+    # parameters += list(model.module.TCONV4_1.parameters())
+    parameters += list(model.module.TCONV3_2.parameters())
+    # parameters += list(model.module.TCONV3_1.parameters())
+    parameters += list(model.module.TCONV2_2.parameters())
+    parameters += list(model.module.TCONV1_2.parameters())
+    parameters += list(model.module.TCONV1_1.parameters())
+    # optimizer = torch.optim.SGD(
+    #     parameters,
+    #     # model.parameters(),
+    #     lr=base_lr,
+    #     momentum=config.momentum,
+    #     weight_decay=config.weight_decay)
+    optimizer = torch.optim.Adam(
+        params=parameters, lr=base_lr,weight_decay=config.weight_decay
+    )
 
     # lr policy ##############################
     lr_policy = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.990)
@@ -260,23 +270,23 @@ def main(pretrain=True):
                 logging.info("Epoch %d: valid_ce_loss_min %.3f"%(epoch, ce_loss))
                 logging.info("Epoch %d: valid_re_loss_min %.3f" % (epoch, re_loss))
                 logging.info("Epoch %d: valid_kl_loss_min %.3f" % (epoch, kl_loss))
-                if len(model.module._width_mult_list) > 1:
-                    model.module.prun_mode = "max"
-                    ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config, add_scalar=True)
-                    logger.add_scalar('ce_loss/val_max', ce_loss, epoch)
-                    logger.add_scalar('re_loss/val_max', re_loss, epoch)
-                    logger.add_scalar('kl_loss/val_max', kl_loss, epoch)
-                    logging.info("Epoch %d: valid_kl_loss_max %.3f" % (epoch, kl_loss))
-                    logging.info("Epoch %d: valid_ce_loss_max %.3f" % (epoch, ce_loss))
-                    logging.info("Epoch %d: valid_re_loss_max %.3f" % (epoch, re_loss))
-                    model.module.prun_mode = "random"
-                    ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config)
-                    logger.add_scalar('ce_loss/val_random', ce_loss, epoch)
-                    logger.add_scalar('re_loss/val_random', re_loss, epoch)
-                    logger.add_scalar('kl_loss/val_random', kl_loss, epoch)
-                    logging.info("Epoch %d: valid_kl_loss_random %.3f" % (epoch, kl_loss))
-                    logging.info("Epoch %d: valid_ce_loss_random %.3f" % (epoch, ce_loss))
-                    logging.info("Epoch %d: valid_re_loss_random %.3f" % (epoch, re_loss))
+                # if len(model.module._width_mult_list) > 1:
+                #     model.module.prun_mode = "max"
+                #     ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config, add_scalar=True)
+                #     logger.add_scalar('ce_loss/val_max', ce_loss, epoch)
+                #     logger.add_scalar('re_loss/val_max', re_loss, epoch)
+                #     logger.add_scalar('kl_loss/val_max', kl_loss, epoch)
+                #     logging.info("Epoch %d: valid_kl_loss_max %.3f" % (epoch, kl_loss))
+                #     logging.info("Epoch %d: valid_ce_loss_max %.3f" % (epoch, ce_loss))
+                #     logging.info("Epoch %d: valid_re_loss_max %.3f" % (epoch, re_loss))
+                #     model.module.prun_mode = "random"
+                #     ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config)
+                #     logger.add_scalar('ce_loss/val_random', ce_loss, epoch)
+                #     logger.add_scalar('re_loss/val_random', re_loss, epoch)
+                #     logger.add_scalar('kl_loss/val_random', kl_loss, epoch)
+                #     logging.info("Epoch %d: valid_kl_loss_random %.3f" % (epoch, kl_loss))
+                #     logging.info("Epoch %d: valid_ce_loss_random %.3f" % (epoch, ce_loss))
+                #     logging.info("Epoch %d: valid_re_loss_random %.3f" % (epoch, re_loss))
             else:
                 valid_losses = []; FPSs = []
                 model.prun_mode = None
@@ -353,6 +363,7 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
     c8 = 0
     c16 = 0
     c32 = 0
+    cfinal = 0
     total = 0
     for step in pbar:
         optimizer.zero_grad()
@@ -388,10 +399,14 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
                 # logger.add_scalar('arch/latency_supernet', architect.latency_supernet, epoch*len(pbar)+step)
 
         ce_loss, re_loss, kl_loss, preds = model(imgs, target, target_en, pretrain)
+        # print(ce_loss)
+        # print(re_loss)
+        # print(kl_loss)
         c, batch_count = cal_acc(preds, target)
         c8 += c[2]
         c16 += c[1]
         c32 += c[0]
+        cfinal += c[3]
         total += batch_count
         ce_loss = torch.mean(ce_loss)
         re_loss = torch.mean(re_loss)
@@ -403,7 +418,7 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
         logger.add_scalar('loss_step/train_ce', ce_loss, epoch*len(pbar)+step)
         logger.add_scalar('loss_step/train_re', re_loss, epoch * len(pbar) + step)
         logger.add_scalar('loss_step/train_kl', kl_loss, epoch * len(pbar) + step)
-        loss = ce_loss + re_loss + kl_loss
+        loss = config.wce * ce_loss + config.wre * re_loss + config.wkl * kl_loss
         loss.backward()
         nn.utils.clip_grad_norm_(model.module.parameters(), config.grad_clip)
         optimizer.step()
@@ -418,8 +433,9 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
     logger.add_scalar('train_acc/acc8', c8 / total, epoch)
     logger.add_scalar('train_acc/acc16', c16 / total, epoch)
     logger.add_scalar('train_acc/acc32', c32 / total, epoch)
+    logger.add_scalar('train_acc/acc_final', cfinal / total, epoch)
     print("The training loss of this epoch is: {}".format((epoch_ce_loss+epoch_re_loss+kl_loss)/count))
-    print("The average training accuracy of this epoch is: {}".format( (c8+c16+c32) / total/3))
+    print("The average training accuracy of this epoch is: {}".format( cfinal/ total))
     torch.cuda.empty_cache()
     # del loss
     # if update_arch: del loss_arch
@@ -432,6 +448,7 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
     c8 = 0
     c16 = 0
     c32 = 0
+    cfinal = 0
     total = 0
     i = 0
     for data_val, target_val in val_loader:
@@ -446,6 +463,7 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         c8 += c[2]
         c16 += c[1]
         c32 += c[0]
+        cfinal += c[3]
         total += batch_count
         ce_loss = torch.mean(ce_loss)
         re_loss = torch.mean(re_loss)
@@ -466,7 +484,8 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         logger.add_scalar('val_acc/acc8', c8 / total, epoch)
         logger.add_scalar('val_acc/acc16', c16 / total, epoch)
         logger.add_scalar('val_acc/acc32', c32 / total, epoch)
-        print("The average validation accuracy of this epoch is: {}".format((c8 + c16 + c32) / total / 3))
+        logger.add_scalar('val_acc/acc_final', cfinal / total, epoch)
+        print("The average validation accuracy of this epoch is: {}".format(cfinal / total))
 
 
     # if FPS:
@@ -533,7 +552,7 @@ def arch_logging(model, args, logger, epoch):
     return 1000./latency2
 
 def cal_acc(preds, target):
-    c = [0, 0, 0]
+    c = [0, 0, 0, 0]
     i = 0
     for pred in preds:
         pred = pred.data.max(1)[1]

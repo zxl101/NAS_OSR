@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.utils
 import torch.nn.functional as F
 from tensorboardX import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 from thop import profile
@@ -38,14 +39,28 @@ from torch.utils.data import DataLoader
 import pickle
 import PIL
 from PIL import Image
+import cv2
+import matplotlib
 import argparse
 
-reconstruction_function = nn.MSELoss()
-reconstruction_function.size_average = False
+def sample_gaussian(m, v):
+    sample = torch.randn(m.shape).to(torch.device("cuda"))
+    # sample = torch.randn(m.shape)
+    m = m.cuda()
+    v = v.cuda()
+    z = m + (v ** 0.5) * sample
+    return z
+
+# from torchviz import make_dot
+# from torchsummary import summary
+
+reconstruction_function = nn.L1Loss()
+reconstruction_function.reduction = 'mean'
 criterion = nn.NLLLoss()
 
 def kl_normal(qm, qv, pm, pv, yh):
 	element_wise = 0.5 * (torch.log(pv) - torch.log(qv) + qv / pv + (qm - pm - yh).pow(2) / pv - 1)
+	# element_wise = 0.5 * (torch.log(pv) - torch.log(qv) - qv / pv - (qm - pm - yh).pow(2) / pv - 1)
 	kl = element_wise.sum(-1)
 	#print("log var1", qv)
 	return torch.mean(kl)
@@ -55,6 +70,68 @@ def adjust_learning_rate(base_lr, power, optimizer, epoch, total_epoch):
     for param_group in optimizer.param_groups:
         param_group['lr'] = param_group['lr'] * power
 
+def sq_difference_from_mean(data, class_mean, num_class):
+    """ Calculates the squared difference from clas mean.
+    """
+    sq_diff_list = []
+    for i in range(num_class):
+        sq_diff_list.append(nn.MSELoss(data, class_mean[i]))
+
+    return torch.stack(sq_diff_list)
+
+
+def class_mean(data, label, num_class):
+    class_mean = []
+    for i in range(num_class):
+        class_mean.append((data[label == i]).mean(0))
+    return torch.stack(class_mean)
+
+def intra_spread(data, label, num_class, class_mean):
+    intra_diff = 0
+
+    for j in range(data.shape[0]):
+        for i in range(num_class):
+            if label[j] == i:
+                intra_diff += ((data - class_mean[i]).pow(2)).sum().sqrt()
+                break
+    return intra_diff / data.shape[0]
+
+def all_pair_distance(A):
+    r = torch.sum(A*A, 1)
+
+    # turn r into column vector
+    r = torch.reshape(r, [-1, 1])
+    D = r - 2*torch.matmul(A, A.T) + r.T
+    return D
+
+def inter_spread(class_mean):
+    ap_dist = all_pair_distance(class_mean)
+    dim = class_mean.shape[0]
+    not_diag_mask = torch.logical_not(torch.eye(dim) == 0)
+    inter_separation = torch.min(ap_dist[not_diag_mask])
+
+    return inter_separation
+    # diff_list = []
+    # for i in range(class_mean.shape[0]):
+    #     for j in range(i,class_mean.shape[0]):
+    #         diff_list.append((class_mean[i]-class_mean[j]).pow(2).sum().sqrt())
+    # return np.min(diff_list)
+
+def cal_ii_loss(data, label, num_class):
+    c_mean = class_mean(data, label, num_class)
+    # print("1111111111111111111111111111111")
+    # print(c_mean)
+    intra_diff = intra_spread(data, label, num_class, c_mean)
+    # print("2222222222222222222222222222222")
+    # print(intra_diff)
+    inter_diff = inter_spread(c_mean)
+    # print("3333333333333333333333333333333")
+    print(inter_diff)
+    loss = intra_diff - inter_diff
+
+    return loss
+
+
 
 
 parser = argparse.ArgumentParser(description='PyTorch OSR Example')
@@ -62,21 +139,15 @@ parser.add_argument('--batch_size', type=int, default=None, help='input batch si
 parser.add_argument('--num_classes', type=int, default=None, help='number of classes')
 parser.add_argument('--nepochs', type=int, default=None, help='number of epochs to train (default: 50)')
 parser.add_argument('--lr', type=float, default=None, help='learning rate (default: 1e-3)')
-# parser.add_argument('--wd', type=float, default=0.00, help='weight decay')
-# parser.add_argument('--momentum', type=float, default=0.01, help='momentum (default: 1e-3)')
-# parser.add_argument('--decreasing_lr', default='60,100,150', help='decreasing strategy')
-# parser.add_argument('--seed', type=int, default=117, help='random seed (default: 1)')
-# parser.add_argument('--log_interval', type=int, default=20,
-#                     help='how many batches to wait before logging training status')
-# parser.add_argument('--val_interval', type=int, default=5, help='how many epochs to wait before another val')
-# parser.add_argument('--test_interval', type=int, default=5, help='how many epochs to wait before another test')
-# parser.add_argument('--lamda', type=int, default=100, help='lamda in loss function')
 parser.add_argument('--load_path', type=str, default=None)
 parser.add_argument('--load_epoch', type=str, default=None)
 parser.add_argument('--layers', type=int, default=None)
 parser.add_argument('--wce', type=float, default=1)
 parser.add_argument('--wre', type=float, default=1)
 parser.add_argument('--wkl', type=float, default=1)
+parser.add_argument('--wii', type=float, default=1)
+parser.add_argument('--ladder', type=int, default=0)
+parser.add_argument('--val', type=str, default="cifar10")
 args = parser.parse_args()
 
 
@@ -84,7 +155,13 @@ def main():
     config.wce = args.wce
     config.wre = args.wre
     config.wkl = args.wkl
-
+    config.wii = args.wii
+    config.val = args.val
+    if args.ladder == 1:
+        config.ladder = True
+    else:
+        config.ladder = False
+    # config.ladder = False
 
     if args.lr != None:
         config.lr = args.lr
@@ -118,36 +195,16 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
 
-    # config network and criterion ################
-    # min_kept = int(config.batch_size * config.image_height * config.image_width // (16 * config.gt_down_sampling ** 2))
-    # criterion = ProbOhemCrossEntropy2d(ignore_label=255, thresh=0.7, min_kept=min_kept, use_weight=False)
-    # distill_criterion = nn.KLDivLoss()
+
     criterion = nn.NLLLoss()
 
-    # data loader ###########################
-    # if config.is_test:
-    #     data_setting = {'img_root': config.img_root_folder,
-    #                     'gt_root': config.gt_root_folder,
-    #                     'train_source': config.train_eval_source,
-    #                     'eval_source': config.eval_source,
-    #                     'test_source': config.test_source,
-    #                     'down_sampling': config.down_sampling}
-    # else:
-    #     data_setting = {'img_root': config.img_root_folder,
-    #                     'gt_root': config.gt_root_folder,
-    #                     'train_source': config.train_source,
-    #                     'eval_source': config.eval_source,
-    #                     'test_source': config.test_source,
-    #                     'down_sampling': config.down_sampling}
-    #
-    # train_loader = get_train_loader(config, Cityscapes, test=config.is_test)
 
     # train_dataset = datasets.MNIST('data/mnist', download=True, train=True,
     #                                transform=transforms.Compose([
     #
     #                                    transforms.ToTensor(),
     #                                    transforms.Resize(64),
-    #                                    transforms.Normalize((0.1307,), (0.3081,)),
+    #                                    transforms.Normalize((0.5,), (0.5,)),
     #                                transforms.Lambda(lambda x: x.repeat(3, 1, 1) )]))
 
     # train_dataset = datasets.SVHN('data/svhn', download=True, split="train",
@@ -157,36 +214,36 @@ def main():
     #                                   # transforms.Normalize((0.5,),(0.5,))
     #                                   # transforms.Lambda(lambda x: x.repeat(3,1,1))
     #                               ]))
-    train_dataset = datasets.CIFAR10('data/cifar10', download=True, train=True,
+    train_dataset = datasets.CIFAR10('data/cifar10', download=False, train=True,
                                      transform=transforms.Compose([
 
                                          transforms.ToTensor(),
                                          transforms.Resize(64),
-                                         transforms.ColorJitter(hue=.05, saturation=.05),
-                                         transforms.RandomHorizontalFlip(),
-                                         transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
+                                         # transforms.ColorJitter(hue=.05, saturation=.05),
+                                         # transforms.RandomHorizontalFlip(),
+                                         # transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
                                          transforms.Normalize((0.5,), (0.5,))
                                      ]))
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
 
+    if args.val == "cifar10":
+        val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,
+                                       transform=transforms.Compose([
 
-    val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,
-                                   transform=transforms.Compose([
-
-                                       transforms.ToTensor(),
-                                       transforms.Resize(64),
-                                       # transforms.ColorJitter(hue=.05, saturation=.05),
-                                       # transforms.RandomHorizontalFlip(),
-                                       # transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
-                                       transforms.Normalize((0.5,), (0.5,))
-                                   ]))
+                                           transforms.ToTensor(),
+                                           transforms.Resize(64),
+                                           # transforms.ColorJitter(hue=.05, saturation=.05),
+                                           # transforms.RandomHorizontalFlip(),
+                                           # transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
+                                           transforms.Normalize((0.5,), (0.5,))
+                                       ]))
     # val_dataset = datasets.MNIST('data/mnist', download=False, train=False,
     #                               transform=transforms.Compose([
     #
     #                                   transforms.ToTensor(),
     #                                   transforms.Resize(64),
-    #                                   transforms.Normalize((0.1307,), (0.3081,)),
+    #                                   transforms.Normalize((0.5,), (0.5,)),
     #                               transforms.Lambda(lambda x: x.repeat(3, 1, 1) )]))
     # val_dataset = datasets.SVHN('data/svhn', download=False, split="test",
     #                               transform=transforms.Compose([
@@ -195,13 +252,14 @@ def main():
     #                                   # transforms.Normalize((0.5,), (0.5,))
     #                                   # transforms.Lambda(lambda x: x.repeat(3,1,1))
     #                               ]))
-    # val_dataset = datasets.CIFAR100('data/cifar100', download=True, train=False,
-    #                                transform=transforms.Compose([
-    #
-    #                                    transforms.ToTensor(),
-    #                                    transforms.Resize(64)
-    #                                    # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    #                                ]))
+    elif args.val == "cifar100":
+        val_dataset = datasets.CIFAR100('data/cifar100', download=False, train=False,
+                                   transform=transforms.Compose([
+
+                                       transforms.ToTensor(),
+                                       transforms.Resize(64),
+                                       transforms.Normalize((0.5,), (0.5,))
+                                   ]))
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
 
 
@@ -220,15 +278,12 @@ def main():
             [state["alpha_%d_0"%arch_idx].detach(), state["alpha_%d_1"%arch_idx].detach(), state["alpha_%d_2"%arch_idx].detach()],
             [None, state["beta_%d_1"%arch_idx].detach(), state["beta_%d_2"%arch_idx].detach()],
             [state["ratio_%d_0"%arch_idx].detach(), state["ratio_%d_1"%arch_idx].detach(), state["ratio_%d_2"%arch_idx].detach()],
-            num_classes=config.num_classes, layers=config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list, stem_head_width=config.stem_head_width[idx])
+            num_classes=config.num_classes, layers=config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list,
+            stem_head_width=config.stem_head_width[idx], in_channel=3)
 
-        # mIoU02 = state["mIoU02"]; latency02 = state["latency02"]; obj02 = objective_acc_lat(mIoU02, latency02)
-        # mIoU12 = state["mIoU12"]; latency12 = state["latency12"]; obj12 = objective_acc_lat(mIoU12, latency12)
-        # if obj02 > obj12: last = [2, 0]
-        # else: last = [2, 1]
         last = [2,1,0]
         lasts.append(last)
-        model.build_structure(last)
+        model.build_structure(last,config.ladder)
         logging.info("net: " + str(model))
         for b in last:
             if len(config.width_mult_list) > 1:
@@ -245,7 +300,8 @@ def main():
         model = nn.DataParallel(model)
         model = model.cuda()
 
-        init_weight(model.module, nn.init.kaiming_normal_, torch.nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
+
+        # init_weight(model.module, nn.init.kaiming_normal_, torch.nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
 
         if arch_idx == 0 and len(config.arch_idx) > 1:
             partial = torch.load(os.path.join(config.teacher_path, "weights%d.pt"%arch_idx))
@@ -255,53 +311,34 @@ def main():
             model.load_state_dict(state)
         elif config.is_eval:
             # partial = torch.load(os.path.join(config.eval_path, "weights%d.pt"%arch_idx))
-            # state = model.module.state_dict()
+            # print(partial.keys())
+            # state1 = model.state_dict()
+            # print(state1.keys())
             # pretrained_dict = {k: v for k, v in partial.items() if k in state}
             # state.update(pretrained_dict)
             # model.module.load_state_dict(state)
-            print("Loading trained weights!")
             model.load_state_dict(torch.load(os.path.join(config.eval_path, "weights0.pt")))
+            # state2 = model.state_dict()
+            # print(list(set(partial.keys()) - set(state2.keys())))
+            # print(state2)
+        # print(model)
 
-        # evaluator = SegEvaluator(Cityscapes(data_setting, 'val', None), config.num_classes, config.image_mean,
-        #                          config.image_std, model, config.eval_scale_array, config.eval_flip, 0, out_idx=0, config=config,
-        #                          verbose=False, save_path=None, show_image=False, show_prediction=False)
-        # evaluators.append(evaluator)
-        # tester = SegTester(Cityscapes(data_setting, 'test', None), config.num_classes, config.image_mean,
-        #                          config.image_std, model, config.eval_scale_array, config.eval_flip, 0, out_idx=0, config=config,
-        #                          verbose=False, save_path=None, show_prediction=False)
-        # testers.append(tester)
 
         # Optimizer ###################################
         base_lr = config.lr
         if arch_idx == 1 or len(config.arch_idx) == 1:
             # optimize teacher solo OR student (w. distill from teacher)
             optimizer = torch.optim.SGD(model.module.parameters(), lr=base_lr, momentum=config.momentum, weight_decay=config.weight_decay)
+            optimizer = torch.optim.Adam(model.module.parameters(), lr=base_lr, weight_decay=config.weight_decay)
+        # print("--------------------------------------------------------------------")
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         print(name)
+        # print("--------------------------------------------------------------------")
         models.append(model)
+    # return None
 
 
-    # Cityscapes ###########################################
-    # if config.is_eval:
-    #     logging.info(config.load_path)
-    #     logging.info(config.eval_path)
-    #     logging.info(config.save)
-    #     with torch.no_grad():
-    #         if config.is_test:
-    #             # test
-    #             print("[test...]")
-    #             with torch.no_grad():
-    #                 test(0, models, testers, logger)
-    #         else:
-    #             # validation
-    #             print("[validation...]")
-    #             valid_mIoUs = infer(models, evaluators, logger)
-    #             for idx, arch_idx in enumerate(config.arch_idx):
-    #                 if arch_idx == 0:
-    #                     logger.add_scalar("mIoU/val_teacher", valid_mIoUs[idx], 0)
-    #                     logging.info("teacher's valid_mIoU %.3f"%(valid_mIoUs[idx]))
-    #                 else:
-    #                     logger.add_scalar("mIoU/val_student", valid_mIoUs[idx], 0)
-    #                     logging.info("student's valid_mIoU %.3f"%(valid_mIoUs[idx]))
-    #     exit(0)
     if config.is_train:
         tbar = tqdm(range(config.nepochs), ncols=80)
         for epoch in tbar:
@@ -318,8 +355,8 @@ def main():
                     # logging.info("layer8 train_Acc %.3f"%(train_Accs[idx][0]))
                     # logger.add_scalar("Acc/train_16", train_Accs[idx][1], epoch)
                     # logging.info("layer16 train_Acc %.3f" % (train_Accs[idx][1]))
-                    # logger.add_scalar("Acc/train_32", train_Accs[idx][2], epoch)
-                    # logging.info("layer32 train_Acc %.3f" % (train_Accs[idx][2]))
+                    logger.add_scalar("Acc/train_32", train_Accs[idx][2], epoch)
+                    logging.info("layer32 train_Acc %.3f" % (train_Accs[idx][2]))
                     logger.add_scalar("Acc/train_final", train_Accs[idx][3], epoch)
                     logging.info("final train_Acc %.3f" % (train_Accs[idx][3]))
                     # logger.add_scalar("AUROC/train_final", train_Accs[idx][4], epoch)
@@ -340,8 +377,8 @@ def main():
                             # logging.info("layer8 val_Acc %.3f" % (acc8))
                             # logger.add_scalar("Val_Acc/val_16", acc16, epoch)
                             # logging.info("layer16 val_Acc %.3f" % (acc16))
-                            # logger.add_scalar("Val_Acc/val_32", acc32, epoch)
-                            # logging.info("layer32 val_Acc %.3f" % (acc32))
+                            logger.add_scalar("Val_Acc/val_32", acc32, epoch)
+                            logging.info("layer32 val_Acc %.3f" % (acc32))
                             logger.add_scalar("Val_Acc/val_final", acc_final, epoch)
                             logging.info("final val_Acc %.3f" % (acc_final))
                             # logger.add_scalar("Val_AUROC/val_final", auroc, epoch)
@@ -352,16 +389,9 @@ def main():
                         save(models[idx], os.path.join(config.save, "weights%d.pt"%arch_idx))
 
     if config.is_eval:
+
         write_features(model, train_loader, config, part="train", dataset="cifar10")
-        write_features(model, val_loader, config, part="val", dataset="cifar10")
-
-
-
-    # test
-    # if config.is_test and (epoch+1) >= 250 and (epoch+1) % 10 == 0:
-    #     tbar.set_description("[Epoch %d/%d][test...]" % (epoch + 1, config.nepochs))
-    #     with torch.no_grad():
-    #         test(epoch, models, testers, logger)
+        write_features(model, val_loader, config, part="val", dataset="cifar100")
 
     for idx, arch_idx in enumerate(config.arch_idx):
         save(models[idx], os.path.join(config.save, "weights%d.pt"%arch_idx))
@@ -382,12 +412,16 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
 
     metrics = [ seg_metrics.Cls_Metrics(n_classes=config.num_classes) for _ in range(len(models)) ]
     lamb = 0.2
+    img_index = 1
+
     for step in pbar:
         optimizer.zero_grad()
 
         minibatch = dataloader.next()
         imgs = minibatch[0]
+        # print(imgs.shape)
         target = minibatch[1]
+        # print(target.shape)
         target_en = torch.Tensor(target.shape[0], config.num_classes)
         target_en.zero_()
         target_en.scatter_(1, target.view(-1, 1), 1)  # one-hot encoding
@@ -396,42 +430,67 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
         target = target.cuda(non_blocking=True)
 
         logits_list = []
+
+        description = ""
         ce_loss = 0
         re_loss = 0
         kl_loss = 0
-        description = ""
+        ii_loss = 0
         for idx, arch_idx in enumerate(config.arch_idx):
             model = models[idx]
             if arch_idx == 0 and len(models) > 1:
                 with torch.no_grad():
-                    logits8 = model(imgs, target_en)
+                    logits8 = model(imgs, target_en, ladder = config.ladder)
                     logits_list.append(logits8)
             else:
                 logits8, logits16, logits32, logits_final, reconstructed,\
-                    latent_mu, latent_var, yh, up32, up16 = model(imgs, target_en)
-                # logits_list.append(logits8)
+                    latent_mu, latent_var, yh, up32, up16 = model(imgs, target_en, ladder = config.ladder)
                 # ce_loss = ce_loss + 2 * lamb * criterion(logits32, target)
                 # ce_loss = ce_loss + lamb * criterion(logits16, target)
                 # ce_loss = ce_loss + lamb * criterion(logits8, target)
+                # ce_loss = ce_loss + criterion(logits_final, target)
                 ce_loss = ce_loss + criterion(logits_final, target)
                 re_loss = re_loss + reconstruction_function(reconstructed, imgs)
+                # ii_loss = ii_loss + cal_ii_loss(sample_gaussian(latent_mu[0],latent_var[0]),target,config.num_classes)
+                # print(ce_loss)
+                # print(ii_loss)
+                # break
                 if up32[0] != None:
                     pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
                     kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
                     kl16 = kl_normal(up32[0],up32[1],latent_mu[1],latent_var[1],0)
                     kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
                     kl_loss = kl_loss + torch.mean(kl32 + kl16 + kl8)
+                    # kl_loss = kl_loss + torch.mean(kl32)
                 else:
                     for i in range(3):
                         pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
                         kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-                # if len(logits_list) > 1:
-                #     loss = loss + distill_criterion(F.softmax(logits_list[1], dim=1).log(), F.softmax(logits_list[0], dim=1))
+
+            # re = torch.Tensor.cpu(reconstructed).detach().numpy()
+            # ori = torch.Tensor.cpu(imgs).detach().numpy()
+            # temp = re[0]
+            # temp = temp * 0.5 + 0.5
+            # temp = temp * 255
+            # temp = temp.transpose(1, 2, 0)
+            # temp = temp.astype(np.uint8)
+            # img = Image.fromarray(temp)
+            # img.save(os.path.join("train_img", "{}.jpeg".format(img_index)))
+            #
+            # ori = ori[0]
+            # ori = ori.transpose(1, 2, 0)
+            # ori = ori * 0.5 + 0.5
+            # ori = ori * 255
+            # ori = ori.astype(np.uint8)
+            # ori = Image.fromarray(ori)
+            # ori.save(os.path.join("train_img", "{}_ori.jpeg".format(img_index)))
+            # img_index += 1
+
 
             metrics[idx].update(logits8.data, logits16.data, logits32.data, logits_final.data, target)
             # description += "[Acc%d_8: %.3f]"%(arch_idx, metrics[idx].get_scores()[0])
             # description += "[Acc%d_16: %.3f]" % (arch_idx, metrics[idx].get_scores()[1])
-            # description += "[Acc%d_32: %.3f]" % (arch_idx, metrics[idx].get_scores()[2])
+            description += "[Acc%d_32: %.3f]" % (arch_idx, metrics[idx].get_scores()[2])
             description += "[Acc%d_final: %.3f]" % (arch_idx, metrics[idx].get_scores()[3])
             # description += "[AUROC_final: %.3f]" % (arch_idx, metrics[idx].get_scores()[4])
 
@@ -439,8 +498,17 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
         logger.add_scalar('train/ce_loss', ce_loss, epoch * len(pbar) + step)
         logger.add_scalar('train/re_loss', re_loss, epoch * len(pbar) + step)
         logger.add_scalar('train/kl_loss', kl_loss, epoch * len(pbar) + step)
+        logger.add_scalar('train/ii_loss', ii_loss, epoch * len(pbar) + step)
 
-        loss = config.wce * ce_loss + config.wre * re_loss + config.wkl * kl_loss
+        loss = config.wce * ce_loss + config.wre * re_loss + config.wkl * kl_loss + config.wii * ii_loss
+        # print(torch.Tensor.cpu(ce_loss).detach().numpy())
+        # print("The losses are:")
+        # print(torch.Tensor.cpu(loss).detach().numpy())
+        # print(torch.Tensor.cpu(config.wre * re_loss).detach().numpy())
+        # print(torch.Tensor.cpu(config.wkl * kl_loss).detach().numpy())
+        # print(torch.Tensor.cpu(config.wce * ce_loss).detach().numpy())
+
+        # print(torch.Tensor.cpu(kl_loss).detach().numpy())
         loss.backward()
         optimizer.step()
 
@@ -453,6 +521,7 @@ def infer(model, val_loader, device=torch.device("cuda"), epoch= 0, logger = Non
     ce_loss = 0
     re_loss = 0
     kl_loss = 0
+    ii_loss = 0
     lamb = 0.2
     total_num = 0
     for data_val, target_val in val_loader:
@@ -463,30 +532,34 @@ def infer(model, val_loader, device=torch.device("cuda"), epoch= 0, logger = Non
         target_val_en.scatter_(1, target_val.view(-1, 1), 1)  # one-hot encoding
         target_val_en = target_val_en.to(device)
         data_val, target_val = data_val.to(device), target_val.to(device)
-        logits8, logits16, logits32, logit_final, reconstructed,\
-            latent_mu, latent_var, yh, up32, up16 = model(data_val, target_val_en)
-        metrics.update(logits8, logits16, logits32, logit_final, target_val)
+        logits8, logits16, logits32, logits_final, reconstructed,\
+            latent_mu, latent_var, yh, up32, up16 = model(data_val, target_val_en, ladder = config.ladder)
+        metrics.update(logits8, logits16, logits32, logits_final, target_val)
         # ce_loss = ce_loss + 2 * lamb * criterion(logits32, target_val)
         # ce_loss = ce_loss + lamb * criterion(logits16, target_val)
         # ce_loss = ce_loss + lamb * criterion(logits8, target_val)
-        ce_loss = ce_loss + criterion(logit_final, target_val)
+        ce_loss = ce_loss + criterion(logits_final, target_val)
         re_loss = re_loss + reconstruction_function(reconstructed, data_val)
+        # ii_loss = ii_loss + cal_ii_loss(sample_gaussian(latent_mu[0], latent_var[0]), target_val, config.num_classes)
         if up32[0] != None:
             pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
             kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
             kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
             kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
             kl_loss = kl_loss + torch.mean(kl32 + kl16 + kl8)
+            # kl_loss = kl_loss + torch.mean(kl32)
         else:
             for i in range(3):
                 pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
                 kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+
     # ce_loss = ce_loss
     # re_loss =re_loss
     # kl_loss = kl_loss
     logger.add_scalar('val/ce_loss', ce_loss, epoch)
     logger.add_scalar('val/re_loss', re_loss, epoch)
     logger.add_scalar('val/kl_loss', kl_loss, epoch)
+    logger.add_scalar('val/ii_loss', ii_loss, epoch)
     return metrics.get_scores()
 
 
@@ -511,46 +584,46 @@ def write_features(model, train_loader, config, dataset="cifar10", part="train",
         target_en = target_en.to(device)
         data, target = data.to(device), target.to(device)
         pred8, pred16, pred_32, pred_final, reconstructed, \
-            latent_mu, latent_var, yh, _, _ = model(data, target_en)
+            latent_mu, latent_var, yh, _, _ = model(data, target_en, ladder = config.ladder)
         # print(reconstructed.shape)
+        # make_dot(reconstructed, params = dict(list(model.module.named_parameters()))).render("model", format="png")
+        # break
         re_loss = ((reconstructed - data)**2).view(config.batch_size, -1).mean(1)
+        # print(re_loss.shape)
         # print(re_loss.shape)
         re = torch.Tensor.cpu(reconstructed).detach().numpy()
         ori = torch.Tensor.cpu(data).detach().numpy()
         # print(re.shape)
 
         temp = re[0]
-        # print(temp.shape)
-        # temp = np.reshape(temp, (temp.shape[1],temp.shape[2],temp.shape[0]))
-        temp = temp.transpose(1,2,0)
-        temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
-        print(np.max(temp))
-        # print(temp.shape)
+        temp = temp * 0.5+0.5
         temp = temp * 255
+        temp = temp.transpose(1,2,0)
         temp = temp.astype(np.uint8)
-        img = Image.fromarray(temp)
+        img = Image.fromarray(temp, 'RGB')
         img.save(os.path.join(img_dir,"{}.jpeg".format(img_index)))
 
         ori = ori[0]
         ori = ori.transpose(1,2,0)
-        ori = ori * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+        ori = ori * 0.5 + 0.5
         ori = ori * 255
         ori = ori.astype(np.uint8)
-        print(np.max(ori))
         ori = Image.fromarray(ori)
         ori.save(os.path.join(img_dir,"{}_ori.jpeg".format(img_index)))
         img_index += 1
-        break
+        # break
 
-        pred = pred_final.max(1, keepdim=True)[1]
+        pred = pred_32.max(1, keepdim=True)[1]
         # print(pred)
-        pred_final = torch.Tensor.cpu(pred_final).detach().numpy()
+        pred_final = torch.Tensor.cpu(pred_32).detach().numpy()
         latent_mu32 = torch.Tensor.cpu(latent_mu[0]).detach().numpy()
         latent_mu16 = torch.Tensor.cpu(latent_mu[1]).detach().numpy()
         latent_mu8 = torch.Tensor.cpu(latent_mu[2]).detach().numpy()
         re_loss = torch.Tensor.cpu(re_loss).detach().numpy()
         target = torch.Tensor.cpu(target).detach().numpy()
         pred = torch.Tensor.cpu(pred).detach().numpy()
+        if config.val != "cifar10" and part=="val":
+            target = np.full(target.shape, config.num_classes)
         with open('{}_fea/{}_mu32.txt'.format(part, dataset), 'ab') as f_test:
             np.savetxt(f_test, latent_mu32, fmt='%f', delimiter=' ', newline='\r')
             f_test.write(b'\n')
