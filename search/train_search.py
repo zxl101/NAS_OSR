@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.utils
 from tensorboardX import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 import matplotlib
@@ -44,7 +45,7 @@ parser.add_argument('--num_classes', type=int, default=None, help='number of cla
 parser.add_argument('--nepochs', type=int, default=None, help='number of epochs to train (default: 50)')
 parser.add_argument('--lr', type=float, default=None, help='learning rate (default: 1e-3)')
 parser.add_argument('--layers', type=int, default=None)
-# parser.add_argument('--wd', type=float, default=0.00, help='weight decay')
+parser.add_argument('--weight_decay', type=float, default=0.00005, help='weight decay')
 # parser.add_argument('--momentum', type=float, default=0.01, help='momentum (default: 1e-3)')
 # parser.add_argument('--decreasing_lr', default='60,100,150', help='decreasing strategy')
 # parser.add_argument('--seed', type=int, default=117, help='random seed (default: 1)')
@@ -56,6 +57,8 @@ parser.add_argument('--layers', type=int, default=None)
 parser.add_argument('--wce', type=float, default=1)
 parser.add_argument('--wre', type=float, default=1)
 parser.add_argument('--wkl', type=float, default=1)
+parser.add_argument('--wdist', type=float, default=1)
+# parser.add_argument('--wkl', type=float, default=1)
 args = parser.parse_args()
 
 
@@ -64,6 +67,8 @@ def main(pretrain=True):
     config.wce = args.wce
     config.wre = args.wre
     config.wkl = args.wkl
+    config.wdist = args.wdist
+    config.weight_decay = args.weight_decay
     if args.batch_size != None:
         config.batch_size = args.batch_size
         config.niters_per_epoch = min(config.num_train_imgs // 2 // config.batch_size, 400)
@@ -131,6 +136,12 @@ def main(pretrain=True):
         model.load_state_dict(state)
     else:
         init_weight(model, nn.init.kaiming_normal_, nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
+        # model.one_hot32.weight.data.uniform_(0,1)
+        # model.one_hot32.bias.data.fill_(0)
+        # model.one_hot16.weight.data.uniform_(0,1)
+        # model.one_hot16.bias.data.fill_(0)
+        # model.one_hot8.weight.data.uniform_(0,1)
+        # model.one_hot8.bias.data.fill_(0)
 
     model = nn.DataParallel(model)
     model.to(device)
@@ -197,7 +208,7 @@ def main(pretrain=True):
     # evaluator = SegEvaluator(Cityscapes(data_setting, 'val', None), config.num_classes, config.image_mean,
     #                          config.image_std, model, config.eval_scale_array, config.eval_flip, 0, config=config,
     #                          verbose=False, save_path=None, show_image=False)
-    train_dataset = datasets.CIFAR10('data/cifar10', download=True, train=True,
+    train_dataset = datasets.CIFAR10('data/cifar10', download=False, train=True,
                                    transform=transforms.Compose([
 
                                        transforms.ToTensor(),
@@ -267,9 +278,11 @@ def main(pretrain=True):
                 logger.add_scalar('ce_loss/val_min', ce_loss, epoch)
                 logger.add_scalar('re_loss/val_min', re_loss, epoch)
                 logger.add_scalar('kl_loss/val_min', kl_loss, epoch)
-                logging.info("Epoch %d: valid_ce_loss_min %.3f"%(epoch, ce_loss))
-                logging.info("Epoch %d: valid_re_loss_min %.3f" % (epoch, re_loss))
-                logging.info("Epoch %d: valid_kl_loss_min %.3f" % (epoch, kl_loss))
+                # logger.add_scalar('latent_distance/val_search', latent_distance, epoch)
+                logging.info("Epoch %d: valid_kl_loss_search %.3f" % (epoch, kl_loss))
+                logging.info("Epoch %d: valid_ce_loss_search %.3f" % (epoch, ce_loss))
+                logging.info("Epoch %d: valid_re_loss_search %.3f" % (epoch, re_loss))
+                # logging.info("Epoch %d: valid_latent_distance %.3f" % (epoch, latent_distance))
                 # if len(model.module._width_mult_list) > 1:
                 #     model.module.prun_mode = "max"
                 #     ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config, add_scalar=True)
@@ -302,9 +315,11 @@ def main(pretrain=True):
                     logger.add_scalar('ce_loss/val_search', ce_loss, epoch)
                     logger.add_scalar('re_loss/val_search', re_loss, epoch)
                     logger.add_scalar('kl_loss/val_search', kl_loss, epoch)
+                    # logger.add_scalar('latent_distance/val_search', latent_distance, epoch)
                     logging.info("Epoch %d: valid_kl_loss_search %.3f" % (epoch, kl_loss))
                     logging.info("Epoch %d: valid_ce_loss_search %.3f" % (epoch, ce_loss))
                     logging.info("Epoch %d: valid_re_loss_search %.3f" % (epoch, re_loss))
+                    # logging.info("Epoch %d: valid_latent_distance %.3f" % (epoch, latent_distance))
                     # if config.latency_weight[idx] > 0:
                     #     logger.add_scalar('Objective/val_%s_8s_32s'%arch_names[idx], objective_acc_lat(valid_mIoUs[3], 1000./fps0), epoch)
                     #     logging.info("Epoch %d: Objective_%s_8s_32s %.3f"%(epoch, arch_names[idx], objective_acc_lat(valid_mIoUs[3], 1000./fps0)))
@@ -351,7 +366,7 @@ def main(pretrain=True):
 
 def train(pretrain, train_loader_model, train_loader_arch, model, architect, optimizer, lr_policy, logger, epoch, update_arch=True, config = None, device = None):
     model.train()
-
+    model.module.latent_space(epoch=epoch, vis=True)
     bar_format = '{desc}[{elapsed}<{remaining},{rate_fmt}]'
     pbar = tqdm(range(config.niters_per_epoch), file=sys.stdout, bar_format=bar_format, ncols=80)
     dataloader_model = iter(train_loader_model)
@@ -398,7 +413,8 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
                 logger.add_scalar('loss_arch/train', loss_arch, epoch*len(pbar)+step)
                 # logger.add_scalar('arch/latency_supernet', architect.latency_supernet, epoch*len(pbar)+step)
 
-        ce_loss, re_loss, kl_loss, preds = model(imgs, target, target_en, pretrain)
+        ce_loss, re_loss, kl_loss, preds = model(input=imgs, target=target, target_de=target_en, pretrain=pretrain)
+        # logger.add_graph(model.module,(imgs,target_en))
         # print(ce_loss)
         # print(re_loss)
         # print(kl_loss)
@@ -411,6 +427,7 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
         ce_loss = torch.mean(ce_loss)
         re_loss = torch.mean(re_loss)
         kl_loss = torch.mean(kl_loss)
+        # latent_distance = torch.mean(latent_distance)
         epoch_ce_loss += ce_loss
         epoch_re_loss += re_loss
         epoch_kl_loss += kl_loss
@@ -418,7 +435,8 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
         logger.add_scalar('loss_step/train_ce', ce_loss, epoch*len(pbar)+step)
         logger.add_scalar('loss_step/train_re', re_loss, epoch * len(pbar) + step)
         logger.add_scalar('loss_step/train_kl', kl_loss, epoch * len(pbar) + step)
-        loss = config.wce * ce_loss + config.wre * re_loss + config.wkl * kl_loss
+        # logger.add_scalar('loss_step/train_latent', latent_distance, epoch * len(pbar) + step)
+        loss = config.wce * ce_loss + config.wre * re_loss + ((epoch + 1)/config.nepochs) * config.wkl * kl_loss
         loss.backward()
         nn.utils.clip_grad_norm_(model.module.parameters(), config.grad_clip)
         optimizer.step()
@@ -445,6 +463,7 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
     total_ce_loss = 0
     total_re_loss = 0
     total_kl_loss = 0
+    total_distance = 0
     c8 = 0
     c16 = 0
     c32 = 0
@@ -468,6 +487,8 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         ce_loss = torch.mean(ce_loss)
         re_loss = torch.mean(re_loss)
         kl_loss = torch.mean(kl_loss)
+        # latent_distance = torch.mean(latent_distance)
+        # total_distance += latent_distance
         total_ce_loss += config.wce * ce_loss
         total_re_loss += config.wre * re_loss
         total_kl_loss += config.wkl * kl_loss
@@ -477,6 +498,7 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
     total_ce_loss = total_ce_loss / i
     total_re_loss = total_re_loss / i
     total_kl_loss = total_kl_loss / i
+    # total_distance = total_distance / i
     print("The validation ce loss is: {}".format(total_ce_loss))
     print("The validation re loss is: {}".format(total_re_loss))
     print("The validation kl loss is: {}".format(total_kl_loss))

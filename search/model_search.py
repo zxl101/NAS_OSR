@@ -10,6 +10,9 @@ from seg_oprs import Head
 import numpy as np
 import os
 import shutil
+from PIL import Image
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
 
 
 reconstruction_function = nn.MSELoss()
@@ -252,8 +255,8 @@ class Cell(nn.Module):
 
 class Network_Multi_Path(nn.Module):
     def __init__(self, num_classes=10, in_channel=3, layers=16, criterion=nn.CrossEntropyLoss(ignore_index=-1), Fch=12,
-                 width_mult_list=[1.,], prun_modes=['arch_ratio',], stem_head_width=[(1., 1.),], latent_dim32 = 32,
-                 latent_dim64=64, latent_dim128=128):
+                 width_mult_list=[1.,], prun_modes=['arch_ratio',], stem_head_width=[(1., 1.),], latent_dim32 = 32*2,
+                 latent_dim64=64*2, latent_dim128=128*2):
         super(Network_Multi_Path, self).__init__()
         self._num_classes = num_classes
         assert layers >= 3
@@ -735,6 +738,30 @@ class Network_Multi_Path(nn.Module):
         return latency
         ###################################
 
+    def latent_space(self, num_class=10, epoch=0, vis = False):
+        class_list = []
+        for i in range(num_class):
+            temp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            temp[i] = 1
+            class_list.append(temp)
+        class_list = torch.FloatTensor(class_list)
+        # print(class_list)
+        # encoded = torch.Tensor(num_class,num_class)
+        # encoded.zero_()
+        # encoded.scatter_(1, class_list.view(-1, 1), 1)
+        encoded = class_list.cuda()
+        class_latent = self.one_hot32(encoded)
+        class_latent = torch.Tensor.cpu(class_latent).detach().numpy()
+        pca = PCA(n_components=2)
+        pca_fea = pca.fit_transform(class_latent)
+        if vis:
+            fig = plt.figure(figsize=(8, 8))
+            ax = fig.add_subplot(1, 1, 1)
+            ax.scatter([x[0] for x in pca_fea], [x[1] for x in pca_fea], s=10)
+            plt.savefig(os.path.join("train_img", "{}.jpg".format(epoch)))
+        return class_latent
+
+
     def forward(self, input, target, target_de, pretrain=False):
         # print(target)
         re_loss = 0
@@ -749,15 +776,16 @@ class Network_Multi_Path(nn.Module):
             for idx in range(len(self._arch_names)):
                 self.arch_idx = idx
                 latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
-                re_loss = re_loss + reconstruction_function(input, reconstructed)
 
+                re_loss = re_loss + reconstruction_function(input, reconstructed)
+                ce_loss = ce_loss + nllloss(predict[0], target)
                 if up32[0] != None:
                     # for i in range(3):
                     #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                    ce_loss = ce_loss + nllloss(predict[-1], target)
+                    # ce_loss = ce_loss + nllloss(predict[0], target)
                     for i in range(3):
                         pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        # ce_loss = ce_loss + nllloss(predict[i], target)
                         kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
                     # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
                     # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
@@ -768,19 +796,44 @@ class Network_Multi_Path(nn.Module):
                 else:
                     for i in range(3):
                         pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        # ce_loss = ce_loss + nllloss(predict[i], target)
                         kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
         if len(self._width_mult_list) > 1:
             self.prun_mode = "max"
             latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
+
+            re = torch.Tensor.cpu(reconstructed).detach().numpy()
+            # ori = torch.Tensor.cpu(input).detach().numpy()
+            temp = re[0]
+            temp = temp * 0.5 + 0.5
+            temp = temp * 255
+            temp = temp.transpose(1, 2, 0)
+            temp = temp.astype(np.uint8)
+            img = Image.fromarray(temp)
+            img.save(os.path.join("train_img", "check.jpeg"))
+
+            latent_distance = 0
+            # latent_space_values = self.latent_space()
+            # latent_space_values = torch.FloatTensor(latent_space_values).cuda()
+            # # print(latent_space_values.shape)
+            # latent_distance = 9999999
+            # for i in range(9):
+            #     for j in range(i+1,10):
+            #         temp_dist = torch.sum((latent_space_values[i] - latent_space_values[j]).pow(2),dim=-1).sqrt()
+            #         if latent_distance > temp_dist:
+            #             latent_distance = temp_dist
+            # # latent_distance = latent_distance / 45
+            # # print(latent_distance)
+
             re_loss = re_loss + reconstruction_function(input, reconstructed)
+            ce_loss = ce_loss + nllloss(predict[0], target)
             if up32[0] != None:
                 # for i in range(3):
                 #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                ce_loss = ce_loss + nllloss(predict[-1], target)
+                # ce_loss = ce_loss + nllloss(predict[0], target)
                 for i in range(3):
                     pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    # ce_loss = ce_loss + nllloss(predict[i], target)
                     kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
                 # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
                 # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
@@ -791,19 +844,20 @@ class Network_Multi_Path(nn.Module):
             else:
                 for i in range(3):
                     pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    # ce_loss = ce_loss + nllloss(predict[i], target)
                     kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
 
             self.prun_mode = "min"
             latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
             re_loss = re_loss + reconstruction_function(input, reconstructed)
+            ce_loss = ce_loss + nllloss(predict[0], target)
             if up32[0] != None:
                 # for i in range(3):
                 #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                ce_loss = ce_loss + nllloss(predict[-1], target)
+                # ce_loss = ce_loss + nllloss(predict[0], target)
                 for i in range(3):
                     pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    # ce_loss = ce_loss + nllloss(predict[i], target)
                     kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
                 # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
                 # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
@@ -814,19 +868,20 @@ class Network_Multi_Path(nn.Module):
             else:
                 for i in range(3):
                     pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    # ce_loss = ce_loss + nllloss(predict[i], target)
                     kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
             if pretrain == True:
                 self.prun_mode = "random"
                 latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
                 re_loss = re_loss + reconstruction_function(input, reconstructed)
+                ce_loss = ce_loss + nllloss(predict[0], target)
                 if up32[0] != None:
                     # for i in range(3):
                     #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                    ce_loss = ce_loss + nllloss(predict[-1], target)
+                    # ce_loss = ce_loss + nllloss(predict[0], target)
                     for i in range(3):
                         pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        # ce_loss = ce_loss + nllloss(predict[i], target)
                         kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
                     # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
                     # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
@@ -837,18 +892,19 @@ class Network_Multi_Path(nn.Module):
                 else:
                     for i in range(3):
                         pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        # ce_loss = ce_loss + nllloss(predict[i], target)
                         kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
                 self.prun_mode = "random"
                 latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
                 re_loss = re_loss + reconstruction_function(input, reconstructed)
+                ce_loss = ce_loss + nllloss(predict[0], target)
                 if up32[0] != None:
                     # for i in range(3):
                     #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                    ce_loss = ce_loss + nllloss(predict[-1], target)
+                    # ce_loss = ce_loss + nllloss(predict[0], target)
                     for i in range(3):
                         pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        # ce_loss = ce_loss + nllloss(predict[i], target)
                         kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
                     # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
                     # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
@@ -859,31 +915,32 @@ class Network_Multi_Path(nn.Module):
                 else:
                     for i in range(3):
                         pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        ce_loss = ce_loss + nllloss(predict[i], target)
+                        # ce_loss = ce_loss + nllloss(predict[i], target)
                         kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
         elif pretrain == True and len(self._width_mult_list) == 1:
             self.prun_mode = "max"
             latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
             re_loss = re_loss + reconstruction_function(input, reconstructed)
+            ce_loss = ce_loss + nllloss(predict[0], target)
             if up32[0] != None:
                 # for i in range(3):
                 #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                ce_loss = ce_loss + nllloss(predict[-1], target)
+                # ce_loss = ce_loss + nllloss(predict[0], target)
                 for i in range(3):
                     pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    # ce_loss = ce_loss + nllloss(predict[i], target)
                     kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
                 # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
                 # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
                 kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
                 kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
                 kl_loss = kl_loss + kl16
-                kl_loss = kl_loss + k8
+                kl_loss = kl_loss + kl8
 
             else:
                 for i in range(3):
                     pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    ce_loss = ce_loss + nllloss(predict[i], target)
+                    # ce_loss = ce_loss + nllloss(predict[i], target)
                     kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
         # print("The reconstruction loss is: {}".format(theta * re_loss))
         # print("The cross entropy loss is: {}".format(lamda * ce_loss))
@@ -895,6 +952,7 @@ class Network_Multi_Path(nn.Module):
         # print("ce_loss: {}".format(ce_loss.shape))
         # print("re_loss: {}".format(re_loss.shape))
         # print("kl_loss: {}".format(kl_loss.shape))
+
         return ce_loss, re_loss, torch.mean(kl_loss), predict
 
     def _build_arch_parameters(self, idx):

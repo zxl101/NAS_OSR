@@ -8,4 +8,7 @@ PRIMITIVES = [
     # 'conv_downup',
     'conv_2x',
     # 'conv_2x_downup',
+    'conv5',
+    'conv5_2x',
+    'maxpool'
 ]

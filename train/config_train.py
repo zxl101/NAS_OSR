@@ -56,7 +56,7 @@ C.bn_momentum = 0.1 # value used for the running_mean and running_var computatio
 """Train Config"""
 C.lr = 0.002 # learning rate for updating supernet weight (NOT arch params)
 C.momentum = 0.9 # SGD momentum
-C.weight_decay = 5e-4 # SGD weight decay
+C.weight_decay = 0.95 # SGD weight decay
 C.nepochs = 150 # how many epochs to train
 
 C.num_workers = 6 # workers for dataloader
@@ -81,7 +81,7 @@ if C.mode == "teacher":
     C.branch = [3] # number of output branches
     C.width_mult_list = [4./12, 6./12, 8./12, 10./12, 1.,] # selection choices for channel pruning
     C.stem_head_width = [(1, 1)] # width ratio (#channel / Fch) for [teacher, student]
-    C.load_path = "search-2x2_F12.L6_batch25_1_1_0_lr0-20210118-001705" # path to the searched directory
+    C.load_path = "search-2x2_F12.L7_batch2000_3_1_0_lr0-20210205-101835" # path to the searched directory
     # C.load_path = "search-2x2_F12.L6_batch5000_10_1_0_lr0-20210125-155252"
     C.load_epoch = "last" # "last" or "int" (e.g. "30"): which epoch to load from the searched architecture
     C.batch_size = 125

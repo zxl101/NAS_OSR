@@ -56,7 +56,7 @@ def sample_gaussian(m, v):
 
 reconstruction_function = nn.L1Loss()
 reconstruction_function.reduction = 'mean'
-criterion = nn.NLLLoss()
+criterion = nn.NLLLoss(reduction='mean')
 
 def kl_normal(qm, qv, pm, pv, yh):
 	element_wise = 0.5 * (torch.log(pv) - torch.log(qv) + qv / pv + (qm - pm - yh).pow(2) / pv - 1)
@@ -148,6 +148,7 @@ parser.add_argument('--wkl', type=float, default=1)
 parser.add_argument('--wii', type=float, default=1)
 parser.add_argument('--ladder', type=int, default=0)
 parser.add_argument('--val', type=str, default="cifar10")
+parser.add_argument('--weight_decay', type=float, default=0.0005)
 args = parser.parse_args()
 
 
@@ -157,6 +158,7 @@ def main():
     config.wkl = args.wkl
     config.wii = args.wii
     config.val = args.val
+    config.weight_decay = args.weight_decay
     if args.ladder == 1:
         config.ladder = True
     else:
@@ -219,9 +221,9 @@ def main():
 
                                          transforms.ToTensor(),
                                          transforms.Resize(64),
-                                         # transforms.ColorJitter(hue=.05, saturation=.05),
-                                         # transforms.RandomHorizontalFlip(),
-                                         # transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
+                                         transforms.ColorJitter(hue=.05, saturation=.05),
+                                         transforms.RandomHorizontalFlip(),
+                                         transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
                                          transforms.Normalize((0.5,), (0.5,))
                                      ]))
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
@@ -328,7 +330,7 @@ def main():
         base_lr = config.lr
         if arch_idx == 1 or len(config.arch_idx) == 1:
             # optimize teacher solo OR student (w. distill from teacher)
-            optimizer = torch.optim.SGD(model.module.parameters(), lr=base_lr, momentum=config.momentum, weight_decay=config.weight_decay)
+            # optimizer = torch.optim.SGD(model.module.parameters(), lr=base_lr, momentum=config.momentum, weight_decay=config.weight_decay)
             optimizer = torch.optim.Adam(model.module.parameters(), lr=base_lr, weight_decay=config.weight_decay)
         # print("--------------------------------------------------------------------")
         # for name, param in model.named_parameters():
@@ -419,9 +421,7 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
 
         minibatch = dataloader.next()
         imgs = minibatch[0]
-        # print(imgs.shape)
         target = minibatch[1]
-        # print(target.shape)
         target_en = torch.Tensor(target.shape[0], config.num_classes)
         target_en.zero_()
         target_en.scatter_(1, target.view(-1, 1), 1)  # one-hot encoding
@@ -445,49 +445,43 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
             else:
                 logits8, logits16, logits32, logits_final, reconstructed,\
                     latent_mu, latent_var, yh, up32, up16 = model(imgs, target_en, ladder = config.ladder)
-                # ce_loss = ce_loss + 2 * lamb * criterion(logits32, target)
-                # ce_loss = ce_loss + lamb * criterion(logits16, target)
-                # ce_loss = ce_loss + lamb * criterion(logits8, target)
-                # ce_loss = ce_loss + criterion(logits_final, target)
-                ce_loss = ce_loss + criterion(logits_final, target)
+                # logits32 = model(imgs, target_en, ladder = config.ladder)
+                ce_loss = ce_loss + criterion(logits32, target)
                 re_loss = re_loss + reconstruction_function(reconstructed, imgs)
                 # ii_loss = ii_loss + cal_ii_loss(sample_gaussian(latent_mu[0],latent_var[0]),target,config.num_classes)
-                # print(ce_loss)
-                # print(ii_loss)
-                # break
                 if up32[0] != None:
                     pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
                     kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
                     kl16 = kl_normal(up32[0],up32[1],latent_mu[1],latent_var[1],0)
                     kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
                     kl_loss = kl_loss + torch.mean(kl32 + kl16 + kl8)
-                    # kl_loss = kl_loss + torch.mean(kl32)
                 else:
                     for i in range(3):
                         pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
                         kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
 
-            # re = torch.Tensor.cpu(reconstructed).detach().numpy()
-            # ori = torch.Tensor.cpu(imgs).detach().numpy()
-            # temp = re[0]
-            # temp = temp * 0.5 + 0.5
-            # temp = temp * 255
-            # temp = temp.transpose(1, 2, 0)
-            # temp = temp.astype(np.uint8)
-            # img = Image.fromarray(temp)
-            # img.save(os.path.join("train_img", "{}.jpeg".format(img_index)))
-            #
-            # ori = ori[0]
-            # ori = ori.transpose(1, 2, 0)
-            # ori = ori * 0.5 + 0.5
-            # ori = ori * 255
-            # ori = ori.astype(np.uint8)
-            # ori = Image.fromarray(ori)
-            # ori.save(os.path.join("train_img", "{}_ori.jpeg".format(img_index)))
-            # img_index += 1
+            re = torch.Tensor.cpu(reconstructed).detach().numpy()
+            ori = torch.Tensor.cpu(imgs).detach().numpy()
+            temp = re[0]
+            temp = temp * 0.5 + 0.5
+            temp = temp * 255
+            temp = temp.transpose(1, 2, 0)
+            temp = temp.astype(np.uint8)
+            img = Image.fromarray(temp)
+            img.save(os.path.join("train_img", "{}.jpeg".format(img_index)))
+
+            ori = ori[0]
+            ori = ori.transpose(1, 2, 0)
+            ori = ori * 0.5 + 0.5
+            ori = ori * 255
+            ori = ori.astype(np.uint8)
+            ori = Image.fromarray(ori)
+            ori.save(os.path.join("train_img", "{}_ori.jpeg".format(img_index)))
+            img_index += 1
 
 
             metrics[idx].update(logits8.data, logits16.data, logits32.data, logits_final.data, target)
+            # metrics[idx].update(None,None,logits32.data,None,target)
             # description += "[Acc%d_8: %.3f]"%(arch_idx, metrics[idx].get_scores()[0])
             # description += "[Acc%d_16: %.3f]" % (arch_idx, metrics[idx].get_scores()[1])
             description += "[Acc%d_32: %.3f]" % (arch_idx, metrics[idx].get_scores()[2])
@@ -501,17 +495,11 @@ def train(train_loader, models, criterion, optimizer, logger, epoch):
         logger.add_scalar('train/ii_loss', ii_loss, epoch * len(pbar) + step)
 
         loss = config.wce * ce_loss + config.wre * re_loss + config.wkl * kl_loss + config.wii * ii_loss
-        # print(torch.Tensor.cpu(ce_loss).detach().numpy())
-        # print("The losses are:")
-        # print(torch.Tensor.cpu(loss).detach().numpy())
-        # print(torch.Tensor.cpu(config.wre * re_loss).detach().numpy())
-        # print(torch.Tensor.cpu(config.wkl * kl_loss).detach().numpy())
-        # print(torch.Tensor.cpu(config.wce * ce_loss).detach().numpy())
 
         # print(torch.Tensor.cpu(kl_loss).detach().numpy())
-        loss.backward()
+        ce_loss.backward()
         optimizer.step()
-
+        # logger.add_graph(model.module,(imgs, target_en))
     return [ metric.get_scores() for metric in metrics ]
 
 
@@ -534,11 +522,10 @@ def infer(model, val_loader, device=torch.device("cuda"), epoch= 0, logger = Non
         data_val, target_val = data_val.to(device), target_val.to(device)
         logits8, logits16, logits32, logits_final, reconstructed,\
             latent_mu, latent_var, yh, up32, up16 = model(data_val, target_val_en, ladder = config.ladder)
+        # logits32 = model(data_val, target_val_en, ladder = config.ladder)
         metrics.update(logits8, logits16, logits32, logits_final, target_val)
-        # ce_loss = ce_loss + 2 * lamb * criterion(logits32, target_val)
-        # ce_loss = ce_loss + lamb * criterion(logits16, target_val)
-        # ce_loss = ce_loss + lamb * criterion(logits8, target_val)
-        ce_loss = ce_loss + criterion(logits_final, target_val)
+        # metrics.update(None,None,logits32.data,None,target_val)
+        ce_loss = ce_loss + criterion(logits32, target_val)
         re_loss = re_loss + reconstruction_function(reconstructed, data_val)
         # ii_loss = ii_loss + cal_ii_loss(sample_gaussian(latent_mu[0], latent_var[0]), target_val, config.num_classes)
         if up32[0] != None:
@@ -547,7 +534,6 @@ def infer(model, val_loader, device=torch.device("cuda"), epoch= 0, logger = Non
             kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
             kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
             kl_loss = kl_loss + torch.mean(kl32 + kl16 + kl8)
-            # kl_loss = kl_loss + torch.mean(kl32)
         else:
             for i in range(3):
                 pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
