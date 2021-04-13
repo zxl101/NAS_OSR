@@ -31,6 +31,8 @@ def revise(epoch):
     print(sum(cifar100_rec > rec_thres))
     # print(sum(cifar100_rec < rec_thres2))
     # print(cifar100_pre.shape)
+    cifar100_pre = cifar100_pre[:10000]
+    cifar100_rec = cifar100_rec[:10000]
     cifar100_pre[(cifar100_rec > rec_thres)] = args.num_class
     # cifar100_pre[(cifar100_rec < rec_thres2)] = args.num_class
     open('{}_fea/{}_pred.txt'.format("val", val_dataset), 'w').close()  # clear
@@ -78,6 +80,9 @@ class GAU(object):
         testfea = np.loadtxt(testsetlist[0])
         testtar = np.loadtxt(testsetlist[1])
         testpre = np.loadtxt(testsetlist[2])
+        testfea = testfea[:10000]
+        testtar = testtar[:10000]
+        testpred = testpre[:10000]
         # testtar = np.full(testtar.shape, args.num_class)
 
         labelnum = self.labelnum
@@ -113,7 +118,12 @@ class GAU(object):
         for j in range(labelnum):
             mu.append(gau[j][0])
             sigma.append(gau[j][1])
+            print(gau[j])
             pNsigma[j] = multivariateGaussianNsigma(sigma[j],threshold)
+
+        np.savetxt('val_fea/mean_vector.txt', mu)
+        # np.savetxt('val_fea/sigma.txt', sigma)
+        np.savetxt('val_fea/pnsigma.txt', pNsigma)
 
 
         for i in range(testsize):

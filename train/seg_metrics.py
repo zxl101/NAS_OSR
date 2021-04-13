@@ -51,17 +51,15 @@ def batch_cls(pred8, pred16, pred32, pred_final, target):
     c16 = 0
     c32 = 0
     c_final = 0
-    if pred8 is not None:
+    if pred8 != None:
         pred8 = pred8.data.max(1)[1]
         c8 += pred8.eq(target.view_as(pred8)).sum().item()
-    if pred16 is not None:
+    if pred16 != None:
         pred16 = pred16.data.max(1)[1]
         c16 += pred16.eq(target.view_as(pred16)).sum().item()
-    if pred32 is not None:
-        pred32 = pred32.data.max(1)[1]
-        # c32 += pred32.eq(target.view_as(pred32)).sum().item()
-        c32 += torch.sum(pred32 == target)
-    if pred_final is not None:
+    pred32 = pred32.data.max(1)[1]
+    c32 += pred32.eq(target.view_as(pred32)).sum().item()
+    if pred_final != None:
         pred_final = pred_final.data.max(1)[1]
         c_final += pred_final.eq(target.view_as(pred_final)).sum().item()
     return c8, c16, c32, c_final, len(target)

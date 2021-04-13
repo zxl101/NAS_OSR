@@ -5,11 +5,13 @@ import time
 import glob
 import logging
 from tqdm import tqdm
+import random
 
 import torch
 import torch.nn as nn
 import torch.utils
 from tensorboardX import SummaryWriter
+from torch.autograd import Variable
 # from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
@@ -20,8 +22,8 @@ from matplotlib import pyplot as plt
 from thop import profile
 
 from config_search import config
-# from dataloader import get_train_loader
-# from datasets import Cityscapes
+from dataloader import MNIST_Dataset, CIFAR10_Dataset, SVHN_Dataset, CIFARAdd10_Dataset, CIFARAdd50_Dataset, CIFARAddN_Dataset, CIFAR100_Dataset, TinyImageNet_Dataset
+
 
 from utils.init_func import init_weight
 # from seg_opr.loss_opr import ProbOhemCrossEntropy2d
@@ -34,7 +36,7 @@ from model_seg import Network_Multi_Path_Infer
 
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-
+from qmv import ocr_test
 from sklearn.metrics import roc_auc_score
 import PIL
 import argparse
@@ -46,32 +48,43 @@ parser.add_argument('--nepochs', type=int, default=None, help='number of epochs 
 parser.add_argument('--lr', type=float, default=None, help='learning rate (default: 1e-3)')
 parser.add_argument('--layers', type=int, default=None)
 parser.add_argument('--weight_decay', type=float, default=0.00005, help='weight decay')
-# parser.add_argument('--momentum', type=float, default=0.01, help='momentum (default: 1e-3)')
-# parser.add_argument('--decreasing_lr', default='60,100,150', help='decreasing strategy')
-# parser.add_argument('--seed', type=int, default=117, help='random seed (default: 1)')
-# parser.add_argument('--log_interval', type=int, default=20,
-#                     help='how many batches to wait before logging training status')
-# parser.add_argument('--val_interval', type=int, default=5, help='how many epochs to wait before another val')
-# parser.add_argument('--test_interval', type=int, default=5, help='how many epochs to wait before another test')
-# parser.add_argument('--lamda', type=int, default=100, help='lamda in loss function')
-parser.add_argument('--wce', type=float, default=1)
-parser.add_argument('--wre', type=float, default=1)
-parser.add_argument('--wkl', type=float, default=1)
-parser.add_argument('--wdist', type=float, default=1)
-# parser.add_argument('--wkl', type=float, default=1)
+parser.add_argument('--lamda', type=float, default=None)
+parser.add_argument('--beta', type=float, default=None)
+parser.add_argument('--beta_z', type=float, default=None)
+parser.add_argument('--seed_sampler', type=int, default=777)
+parser.add_argument('--dataset', type=str, default="CIFAR10")
+parser.add_argument('--use_model', action="store_true", default=False, help='If use model to get the train feature')
+parser.add_argument('--cf', action="store_true", default=False, help='use counterfactual generation')
+parser.add_argument('--cf_threshold', action="store_true", default=False, help='use counterfactual threshold in revise_cf')
+parser.add_argument('--yh', action="store_true", default=False, help='use yh rather than feature_y_mean')
+parser.add_argument('--use_model_gau', action="store_true", default=False, help='use feature by model in gau')
+parser.add_argument('--threshold', type=float, default=0.5, help='threshold of gaussian model')
+parser.add_argument('--temperature', type=float, default=None)
+parser.add_argument('--pretrain_nepochs', type=int, default=None)
+parser.add_argument('--pretrain_metric', type=str, default='f1_score')
+parser.add_argument('--search_metric', type=str, default='f1_score')
+parser.add_argument('--unseen_num', type=int, default=None)
 args = parser.parse_args()
 
+def cycle(iterable):
+    while True:
+        for x in iterable:
+            yield x
 
 def main(pretrain=True):
-
-    config.wce = args.wce
-    config.wre = args.wre
-    config.wkl = args.wkl
-    config.wdist = args.wdist
-    config.weight_decay = args.weight_decay
+    if args.temperature != None:
+        config.temperature = args.temperature
+    if args.lamda != None:
+        config.lamda = args.lamda
+    if args.beta != None:
+        config.beta = args.beta
+    if args.beta_z != None:
+        config.beta_z = args.beta_z
+    if args.weight_decay != None:
+        config.weight_decay = args.weight_decay
     if args.batch_size != None:
         config.batch_size = args.batch_size
-        config.niters_per_epoch = min(config.num_train_imgs // 2 // config.batch_size, 400)
+        config.niters_per_epoch = min(config.num_train_imgs // 2 // config.batch_size, 1000)
     if args.num_classes != None:
         config.num_classes = args.num_classes
     if args.nepochs != None:
@@ -80,17 +93,61 @@ def main(pretrain=True):
         config.lr = args.lr
     if args.layers != None:
         config.layers = args.layers
+    if args.pretrain_nepochs != None:
+        config.pretrain_nepochs = args.pretrain_nepochs
+    if args.unseen_num != None:
+        config.unseen_num = args.unseen_num
+    config.use_model = args.use_model
+    config.cf = args.cf
+    config.cf_threshold = args.cf_threshold
+    config.yh = args.yh
+    config.use_model_gau = args.use_model_gau
+    config.threshold = args.threshold
+    config.cuda = True
+    config.pretrain_metric = args.pretrain_metric
+    config.search_metric = args.search_metric
 
-    if config.pretrain == True:
-        config.save = "pretrain-%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d"%(config.image_height, config.image_width,
-                                                                      config.Fch, config.layers, config.batch_size,
-                                                                      config.wce,config.wre,config.wkl,config.lr)
-    else:
-        config.save = "%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d" % (config.image_height, config.image_width,
-                                                                        config.Fch, config.layers, config.batch_size,
-                                                                        config.wce, config.wre, config.wkl, config.lr)
+    if args.dataset == "MNIST":
+        load_dataset = MNIST_Dataset()
+        args.num_classes = 4
+        in_channel = 1
+    elif args.dataset == "CIFAR10":
+        load_dataset = CIFAR10_Dataset()
+        args.num_classes = 4
+        in_channel = 3
+    elif args.dataset == "SVHN":
+        load_dataset = SVHN_Dataset()
+        args.num_classes = 4
+        in_channel = 3
+    elif args.dataset == "CIFARAdd10":
+        load_dataset = CIFARAdd10_Dataset()
+        args.num_classes = 4
+        in_channel = 3
+    elif args.dataset == "CIFARAdd50":
+        load_dataset = CIFARAdd50_Dataset()
+        args.num_classes = 4
+        in_channel = 3
+    elif args.dataset == "CIFARAddN":
+        load_dataset = CIFARAddN_Dataset()
+        args.num_classes = 4
+        in_channel = 3
+    elif args.dataset == "CIFAR100":
+        load_dataset = CIFAR100_Dataset()
+        args.num_classes = 15
+        in_channel = 3
+    elif args.dataset == "TinyImageNet":
+        load_dataset = TinyImageNet_Dataset()
+        args.num_classes = 70
+        in_channel = 3
+    config.num_classes = args.num_classes
+    config.in_channel = in_channel
 
-    config.save = 'search-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"))
+    # pretrain
+    config.save = "pretrain-%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d"%(config.image_height, config.image_width,
+                                                                  config.Fch, config.layers, config.batch_size,
+                                                                  config.lamda,config.beta,config.beta_z,config.lr)
+
+    config.save = 'search-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
     create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
 
@@ -101,47 +158,22 @@ def main(pretrain=True):
     logging.getLogger().addHandler(fh)
 
     assert type(pretrain) == bool or type(pretrain) == str
-    update_arch = True
-    if pretrain == True:
-        update_arch = False
+    update_arch = False
     logging.info("args = %s", str(config))
     # preparation ################
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
-    seed = config.seed
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-
-    # config network and criterion ################
-    # min_kept = int(config.batch_size * config.image_height * config.image_width // (16 * config.gt_down_sampling ** 2))
-    # ohem_criterion = ProbOhemCrossEntropy2d(ignore_label=255, thresh=0.7, min_kept=min_kept, use_weight=False)
 
     # Model #######################################
-    model = Network(config.num_classes, config.in_channel, config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list, prun_modes=config.prun_modes, stem_head_width=config.stem_head_width)
-    # input_check = (torch.randn(1, 3, 64, 64,device=torch.device("cpu")),torch.randn(1, device=torch.device("cpu")), torch.randn(1,10,device=torch.device("cpu")))
-    # # for item in input_check:
-    # #     item.to(torch.device("cuda"))
-    # flops, params = profile(model, inputs= input_check, verbose=False)
-    # logging.info("params = %fMB, FLOPs = %fGB", params / 1e6, flops / 1e9)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = Network(config.num_classes, config.in_channel, config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list,
+                    prun_modes=config.prun_modes, stem_head_width=config.stem_head_width, z_dim=config.z_dim,
+                    lamda=config.lamda, beta=config.beta, beta_z=config.beta_z, temperature=config.temperature)
+
+    use_cuda = torch.cuda.is_available() and True
+    device = torch.device("cuda" if use_cuda else "cpu")
     model = model.to(device)
 
-    if type(pretrain) == str:
-        partial = torch.load(pretrain + "/weights.pt", map_location='cuda:0')
-        state = model.state_dict()
-        pretrained_dict = {k: v for k, v in partial.items() if k in state and state[k].size() == partial[k].size()}
-        state.update(pretrained_dict)
-        model.load_state_dict(state)
-    else:
-        init_weight(model, nn.init.kaiming_normal_, nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
-        # model.one_hot32.weight.data.uniform_(0,1)
-        # model.one_hot32.bias.data.fill_(0)
-        # model.one_hot16.weight.data.uniform_(0,1)
-        # model.one_hot16.bias.data.fill_(0)
-        # model.one_hot8.weight.data.uniform_(0,1)
-        # model.one_hot8.bias.data.fill_(0)
+    init_weight(model, nn.init.kaiming_normal_, nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
 
     model = nn.DataParallel(model)
     model.to(device)
@@ -150,39 +182,22 @@ def main(pretrain=True):
     # Optimizer ###################################
     base_lr = config.lr
     parameters = []
-    parameters += list(model.module.stem.parameters())
+    # parameters += list(model.module.stem.parameters())
     parameters += list(model.module.cells.parameters())
-    # parameters += list(model.module.refine32.parameters())
-    # parameters += list(model.module.refine16.parameters())
-    # parameters += list(model.module.refine8.parameters())
-    # parameters += list(model.module.refine4.parameters())
-    # parameters += list(model.module.refine2.parameters())
-    # parameters += list(model.module.refine1.parameters())
-    # parameters += list(model.module.reconstruct.parameters())
+    parameters += list(model.module.down1.parameters())
+    parameters += list(model.module.down2.parameters())
+    parameters += list(model.module.down4.parameters())
+    parameters += list(model.module.dec32.parameters())
+    parameters += list(model.module.up32.parameters())
+    parameters += list(model.module.up16.parameters())
+    parameters += list(model.module.up8.parameters())
+    parameters += list(model.module.up4.parameters())
+    parameters += list(model.module.up2.parameters())
+    parameters += list(model.module.refine1.parameters())
     parameters += list(model.module.mean_layer32.parameters())
     parameters += list(model.module.var_layer32.parameters())
-    parameters += list(model.module.classifier32.parameters())
+    parameters += list(model.module.classifier.parameters())
     parameters += list(model.module.one_hot32.parameters())
-    parameters += list(model.module.mean_layer16.parameters())
-    parameters += list(model.module.var_layer16.parameters())
-    parameters += list(model.module.classifier16.parameters())
-    parameters += list(model.module.one_hot16.parameters())
-    parameters += list(model.module.mean_layer8.parameters())
-    parameters += list(model.module.var_layer8.parameters())
-    parameters += list(model.module.classifier8.parameters())
-    parameters += list(model.module.one_hot8.parameters())
-    parameters += list(model.module.fc1.parameters())
-    parameters += list(model.module.fc2.parameters())
-    parameters += list(model.module.fc3.parameters())
-    parameters += list(model.module.TCONV5_2.parameters())
-    # parameters += list(model.module.TCONV5_1.parameters())
-    parameters += list(model.module.TCONV4_2.parameters())
-    # parameters += list(model.module.TCONV4_1.parameters())
-    parameters += list(model.module.TCONV3_2.parameters())
-    # parameters += list(model.module.TCONV3_1.parameters())
-    parameters += list(model.module.TCONV2_2.parameters())
-    parameters += list(model.module.TCONV1_2.parameters())
-    parameters += list(model.module.TCONV1_1.parameters())
     # optimizer = torch.optim.SGD(
     #     parameters,
     #     # model.parameters(),
@@ -194,67 +209,61 @@ def main(pretrain=True):
     )
 
     # lr policy ##############################
-    lr_policy = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.990)
+    lr_policy = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.970)
 
-    # data loader ###########################
-    # data_setting = {'img_root': config.img_root_folder,
-    #                 'gt_root': config.gt_root_folder,
-    #                 'train_source': config.train_source,
-    #                 'eval_source': config.eval_source,
-    #                 'down_sampling': config.down_sampling}
-    # train_loader_model = get_train_loader(config, Cityscapes, portion=config.train_portion)
-    # train_loader_arch = get_train_loader(config, Cityscapes, portion=config.train_portion-1)
-    #
-    # evaluator = SegEvaluator(Cityscapes(data_setting, 'val', None), config.num_classes, config.image_mean,
-    #                          config.image_std, model, config.eval_scale_array, config.eval_flip, 0, config=config,
-    #                          verbose=False, save_path=None, show_image=False)
-    train_dataset = datasets.CIFAR10('data/cifar10', download=False, train=True,
-                                   transform=transforms.Compose([
-
-                                       transforms.ToTensor(),
-                                       transforms.Resize(64),
-                                       transforms.ColorJitter(hue=.05, saturation=.05),
-                                       transforms.RandomHorizontalFlip(),
-                                       transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
-                                       transforms.Normalize((0.5,), (0.5,))
-                                   ]))
-    train_dataset_model, train_dataset_arch = torch.utils.data.random_split(train_dataset,[25000,25000])
-    # print(len(train_dataset_model))
-    # print(len(train_datset_arch))
-    # return None
-    train_loader_model = DataLoader(train_dataset_model, batch_size=config.batch_size, shuffle=True, num_workers=4)
-
-    # train_dataset_arch = datasets.CIFAR10('data/cifar10', download=False, train=True,
-    #                                transform=transforms.Compose([
-    #
-    #                                    transforms.ToTensor(),
-    #                                    transforms.Resize(64),
-    #                                    transforms.ColorJitter(hue=.05, saturation=.05),
-    #                                    transforms.RandomHorizontalFlip(),
-    #                                    transforms.RandomRotation(20, resample=PIL.Image.BILINEAR),
-    #                                    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
-    train_loader_arch = DataLoader(train_dataset_arch, batch_size=config.batch_size, shuffle=True, num_workers=4)
-
-    val_dataset = datasets.CIFAR10('data/cifar10', download=False, train=False,
-                                 transform=transforms.Compose([
-
-                                     transforms.ToTensor(),
-                                     transforms.Resize(64),
-                                     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
-    val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
-    print("The size of the validation set is: {}".format(len(val_loader.dataset)))
-
-    if update_arch:
-        for idx in range(len(config.latency_weight)):
-            logger.add_scalar("arch/latency_weight%d"%idx, config.latency_weight[idx], 0)
-            logging.info("arch_latency_weight%d = "%idx + str(config.latency_weight[idx]))
+    seed_sampler = int(args.seed_sampler)
+    train_dataset, val_dataset, pick_dataset, test_dataset = load_dataset.sampler_search(seed_sampler, args)
+    if len(train_dataset) % 2 == 0 :
+        train_dataset_model, train_dataset_arch = torch.utils.data.random_split(train_dataset,[len(train_dataset)//2, len(train_dataset)//2])
+    else:
+        train_dataset_model, train_dataset_arch = torch.utils.data.random_split(train_dataset, [len(train_dataset) // 2 + 1,
+                                                                                                len(
+                                                                                                    train_dataset) // 2])
+    train_loader_model = DataLoader(train_dataset_model, batch_size=config.batch_size, shuffle=True, num_workers=0)
+    train_loader_arch = DataLoader(train_dataset_arch, batch_size=config.batch_size, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
+    pick_loader = DataLoader(pick_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
+    # test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
 
     tbar = tqdm(range(config.nepochs), ncols=80)
-    valid_loss_history = []; FPSs_history = [];
-    latency_supernet_history = []; latency_weight_history = [];
-    valid_names = ["8s", "16s", "32s", "8s_32s", "16s_32s"]
-    arch_names = {0: "teacher", 1: "student"}
+    best_val_loss = 10000000
+    best_f1_score = 10
+    best_acc = 0
+    best_val_epoch = 0
+    select_metric = config.pretrain_metric
     for epoch in tbar:
+        if epoch == config.pretrain_nepochs:
+            partial = torch.load(config.save + '/weights.pt', map_location='cuda:0')
+            state = model.state_dict()
+            pretrained_dict = {k: v for k, v in partial.items() if k in state and state[k].size() == partial[k].size()}
+            state.update(pretrained_dict)
+            model.load_state_dict(state)
+            config.save = "%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d" % (config.image_height, config.image_width,
+                                                                   config.Fch, config.layers, config.batch_size,
+                                                                   config.lamda, config.beta, config.beta_z, config.lr)
+            config.save = 'search-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
+            create_exp_dir(config.save, scripts_to_save=glob.glob('*.py') + glob.glob('*.sh'))
+            logger = SummaryWriter(config.save)
+
+            log_format = '%(asctime)s %(message)s'
+            logging.basicConfig(stream=sys.stdout, level=logging.INFO, format=log_format, datefmt='%m/%d %I:%M:%S %p')
+            fh = logging.FileHandler(os.path.join(config.save, 'log.txt'))
+            fh.setFormatter(logging.Formatter(log_format))
+            logging.getLogger().addHandler(fh)
+            update_arch = True
+            pretrain = "111"
+            logging.info("args = %s", str(config))
+            best_f1_score = 10
+            best_val_loss = 10000000
+            best_acc = 0
+            best_val_epoch = 0
+            config.nepochs -= config.pretrain_nepochs
+            select_metric = config.search_metric
+
+
+        if epoch >= config.pretrain_nepochs:
+            epoch -= config.pretrain_nepochs
+
         logging.info(pretrain)
         logging.info(config.save)
         logging.info("lr: " + str(optimizer.param_groups[0]['lr']))
@@ -273,65 +282,47 @@ def main(pretrain=True):
         tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
         with torch.no_grad():
             if pretrain == True:
-                model.module.prun_mode = "min"
-                ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config)
-                logger.add_scalar('ce_loss/val_min', ce_loss, epoch)
-                logger.add_scalar('re_loss/val_min', re_loss, epoch)
-                logger.add_scalar('kl_loss/val_min', kl_loss, epoch)
-                # logger.add_scalar('latent_distance/val_search', latent_distance, epoch)
-                logging.info("Epoch %d: valid_kl_loss_search %.3f" % (epoch, kl_loss))
-                logging.info("Epoch %d: valid_ce_loss_search %.3f" % (epoch, ce_loss))
-                logging.info("Epoch %d: valid_re_loss_search %.3f" % (epoch, re_loss))
-                # logging.info("Epoch %d: valid_latent_distance %.3f" % (epoch, latent_distance))
-                # if len(model.module._width_mult_list) > 1:
-                #     model.module.prun_mode = "max"
-                #     ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config, add_scalar=True)
-                #     logger.add_scalar('ce_loss/val_max', ce_loss, epoch)
-                #     logger.add_scalar('re_loss/val_max', re_loss, epoch)
-                #     logger.add_scalar('kl_loss/val_max', kl_loss, epoch)
-                #     logging.info("Epoch %d: valid_kl_loss_max %.3f" % (epoch, kl_loss))
-                #     logging.info("Epoch %d: valid_ce_loss_max %.3f" % (epoch, ce_loss))
-                #     logging.info("Epoch %d: valid_re_loss_max %.3f" % (epoch, re_loss))
-                #     model.module.prun_mode = "random"
-                #     ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config)
-                #     logger.add_scalar('ce_loss/val_random', ce_loss, epoch)
-                #     logger.add_scalar('re_loss/val_random', re_loss, epoch)
-                #     logger.add_scalar('kl_loss/val_random', kl_loss, epoch)
-                #     logging.info("Epoch %d: valid_kl_loss_random %.3f" % (epoch, kl_loss))
-                #     logging.info("Epoch %d: valid_ce_loss_random %.3f" % (epoch, ce_loss))
-                #     logging.info("Epoch %d: valid_re_loss_random %.3f" % (epoch, re_loss))
+                model.module.prun_mode = "max"
+                # ce_loss, kl_loss, re_loss, contras_loss = infer(epoch, model, val_loader, logger, FPS=False, config=config)
+                # total_val_loss = ce_loss + kl_loss + re_loss + contras_loss
+                f1_score, loss, acc = test(model, train_loader_model, val_loader, pick_loader,epoch,logger)
             else:
                 valid_losses = []; FPSs = []
                 model.prun_mode = None
                 for idx in range(len(model.module._arch_names)):
                     # arch_idx
                     model.module.arch_idx = idx
-                    # valid_loss, fps0, fps1 = infer(epoch, model.module, val_loader, logger, config=config)
-                    ce_loss, re_loss, kl_loss = infer(epoch, model, val_loader, logger, config=config)
-                    # valid_losses.append(valid_loss)
-                    # FPSs.append([fps0, fps1])
-                    # logger.add_scalar('mIoU/val_min', valid_loss, epoch)
-                    # logging.info("Epoch %d: valid_loss_min %.3f" % (epoch, loss))
-                    logger.add_scalar('ce_loss/val_search', ce_loss, epoch)
-                    logger.add_scalar('re_loss/val_search', re_loss, epoch)
-                    logger.add_scalar('kl_loss/val_search', kl_loss, epoch)
-                    # logger.add_scalar('latent_distance/val_search', latent_distance, epoch)
-                    logging.info("Epoch %d: valid_kl_loss_search %.3f" % (epoch, kl_loss))
-                    logging.info("Epoch %d: valid_ce_loss_search %.3f" % (epoch, ce_loss))
-                    logging.info("Epoch %d: valid_re_loss_search %.3f" % (epoch, re_loss))
-                    # logging.info("Epoch %d: valid_latent_distance %.3f" % (epoch, latent_distance))
-                    # if config.latency_weight[idx] > 0:
-                    #     logger.add_scalar('Objective/val_%s_8s_32s'%arch_names[idx], objective_acc_lat(valid_mIoUs[3], 1000./fps0), epoch)
-                    #     logging.info("Epoch %d: Objective_%s_8s_32s %.3f"%(epoch, arch_names[idx], objective_acc_lat(valid_mIoUs[3], 1000./fps0)))
-                    #     logger.add_scalar('Objective/val_%s_16s_32s'%arch_names[idx], objective_acc_lat(valid_mIoUs[4], 1000./fps1), epoch)
-                    #     logging.info("Epoch %d: Objective_%s_16s_32s %.3f"%(epoch, arch_names[idx], objective_acc_lat(valid_mIoUs[4], 1000./fps1)))
-                # valid_loss_history.append(valid_losses)
-                # FPSs_history.append(FPSs)
-                if update_arch:
-                    latency_supernet_history.append(architect.latency_supernet)
-                latency_weight_history.append(architect.latency_weight)
 
-        save(model, os.path.join(config.save, 'weights.pt'))
+                    # ce_loss, kl_loss, re_loss, contras_loss = infer(epoch, model, val_loader, logger, config=config)
+                    # total_val_loss = ce_loss + kl_loss + re_loss + contras_loss
+                    f1_score, loss, acc = test(model, train_loader_model, val_loader, pick_loader, epoch, logger)
+                # if update_arch:
+                #     latency_supernet_history.append(architect.latency_supernet)
+                # latency_weight_history.append(architect.latency_weight)
+            if epoch % config.val_interval == 0 and epoch >= 0:
+
+                if select_metric == 'loss':
+                    if best_val_loss > loss:
+                        best_val_loss = loss
+                        best_val_epoch = epoch
+                        save(model, os.path.join(config.save, 'weights.pt'))
+                    else:
+                        continue
+                elif select_metric == 'acc':
+                    if best_acc < acc:
+                        best_acc = acc
+                        best_val_epoch = epoch
+                        save(model, os.path.join(config.save, 'weights.pt'))
+                    else:
+                        continue
+                else:
+                    if best_f1_score > f1_score:
+                        best_f1_score = f1_score
+                        best_val_epoch = epoch
+                        save(model, os.path.join(config.save, 'weights.pt'))
+
+
+        save(model, os.path.join(config.save, 'epoch{}_weights.pt'.format(epoch)))
         if type(pretrain) == str:
             # contains arch_param names: {"alphas": alphas, "betas": betas, "gammas": gammas, "ratios": ratios}
             for idx, arch_name in enumerate(model.module._arch_names):
@@ -342,50 +333,57 @@ def main(pretrain=True):
                     state[name] = getattr(model.module, name)
                 for name in arch_name['ratios']:
                     state[name] = getattr(model.module, name)
-                # state["mIoU02"] = valid_mIoUs[3]
-                # state["mIoU12"] = valid_mIoUs[4]
-                state["ce_loss"] = ce_loss
-                state["re_loss"] = re_loss
-                state["kl_loss"] = kl_loss
-                # if pretrain is not True:
-                #     state["latency02"] = 1000. / fps0
-                #     state["latency12"] = 1000. / fps1
+
                 torch.save(state, os.path.join(config.save, "arch_%d_%d.pt"%(idx, epoch)))
-                torch.save(state, os.path.join(config.save, "arch_%d.pt"%(idx)))
+                # torch.save(state, os.path.join(config.save, "arch_%d.pt"%(idx)))
+                if best_val_epoch == epoch:
+                    torch.save(state, os.path.join(config.save, "arch_%d.pt" % (idx)))
 
-        # if update_arch:
-        #     for idx in range(len(config.latency_weight)):
-        #         if config.latency_weight[idx] > 0:
-        #             if (int(FPSs[idx][0] >= config.FPS_max[idx]) + int(FPSs[idx][1] >= config.FPS_max[idx])) >= 1:
-        #                 architect.latency_weight[idx] /= 2
-        #             elif (int(FPSs[idx][0] <= config.FPS_min[idx]) + int(FPSs[idx][1] <= config.FPS_min[idx])) > 0:
-        #                 architect.latency_weight[idx] *= 2
-        #             logger.add_scalar("arch/latency_weight_%s"%arch_names[idx], architect.latency_weight[idx], epoch+1)
-        #             logging.info("arch_latency_weight_%s = "%arch_names[idx] + str(architect.latency_weight[idx]))
 
+    # open('%s/train_fea.txt' % config.save, 'w').close()  # clear
+    # np.savetxt('%s/train_fea.txt' % config.save, train_fea, delimiter=' ', fmt='%f')
+    # open('%s/train_tar.txt' % config.save, 'w').close()
+    # np.savetxt('%s/train_tar.txt' % config.save, train_tar, delimiter=' ', fmt='%d')
+    # open('%s/train_rec.txt' % config.save, 'w').close()
+    # np.savetxt('%s/train_rec.txt' % config.save, train_rec, delimiter=' ', fmt='%f')
+    #
+    # fea_omn = np.loadtxt('%s/test_fea.txt' % config.save)
+    # tar_omn = np.loadtxt('%s/test_tar.txt' % config.save)
+    # pre_omn = np.loadtxt('%s/test_pre.txt' % config.save)
+    # rec_omn = np.loadtxt('%s/test_rec.txt' % config.save)
+    #
+    # open('%s/test_fea.txt' % config.save, 'w').close()  # clear
+    # np.savetxt('%s/test_fea.txt' % config.save, fea_omn, delimiter=' ', fmt='%f')
+    # open('%s/test_tar.txt' % config.save, 'w').close()
+    # np.savetxt('%s/test_tar.txt' % config.save, tar_omn, delimiter=' ', fmt='%d')
+    # open('%s/test_pre.txt' % config.save, 'w').close()
+    # np.savetxt('%s/test_pre.txt' % config.save, pre_omn, delimiter=' ', fmt='%d')
+    # open('%s/test_rec.txt' % config.save, 'w').close()
+    # np.savetxt('%s/test_rec.txt' % config.save, rec_omn, delimiter=' ', fmt='%d')
+    print("Best epoch is {}".format(best_val_epoch))
+    print("Best loss is {}".format(best_val_loss))
 
 def train(pretrain, train_loader_model, train_loader_arch, model, architect, optimizer, lr_policy, logger, epoch, update_arch=True, config = None, device = None):
+    open('%s/train_fea.txt' % config.save, 'w').close()
+    open('%s/train_tar.txt' % config.save, 'w').close()
+    open('%s/train_rec.txt' % config.save, 'w').close()
+
     model.train()
-    model.module.latent_space(epoch=epoch, vis=True)
+    # model.module.latent_space(epoch=epoch, vis=True)
     bar_format = '{desc}[{elapsed}<{remaining},{rate_fmt}]'
     pbar = tqdm(range(config.niters_per_epoch), file=sys.stdout, bar_format=bar_format, ncols=80)
-    dataloader_model = iter(train_loader_model)
-    dataloader_arch = iter(train_loader_arch)
+    dataloader_model = iter(cycle(train_loader_model))
+    dataloader_arch = iter(cycle(train_loader_arch))
     epoch_ce_loss = 0
     epoch_re_loss = 0
     epoch_kl_loss = 0
+    epoch_contras_loss = 0
     count = 0
-    c8 = 0
-    c16 = 0
-    c32 = 0
-    cfinal = 0
-    total = 0
+    correct_train = 0
     for step in pbar:
         optimizer.zero_grad()
 
-
-        minibatch = dataloader_model.next()
-        imgs = minibatch[0]
+        minibatch = next(dataloader_model)
         imgs = minibatch[0]
         target = minibatch[1]
         target_en = torch.Tensor(target.shape[0], config.num_classes)
@@ -394,82 +392,89 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, opt
         target_en = target_en.to(device)
         imgs = imgs.to(device)
         target = target.to(device)
+        imgs, target = Variable(imgs), Variable(target)
 
         if update_arch:
+            # print("Updating architecture")
             # get a random minibatch from the search queue with replacement
             pbar.set_description("[Arch Step %d/%d]" % (step + 1, len(train_loader_model)))
-            minibatch = dataloader_arch.next()
+            minibatch = next(dataloader_arch)
             imgs_search = minibatch[0]
-            target_search = minibatch[1]
+            target_search =minibatch[1]
             target_en_search = torch.Tensor(target_search.shape[0], config.num_classes)
             target_en_search.zero_()
             target_en_search.scatter_(1, target_search.view(-1, 1), 1)  # one-hot encoding
             target_en_search = target_en_search.to(device)
             imgs_search = imgs_search.to(device)
             target_search = target_search.to(device)
+            imgs_search, target_search = Variable(imgs_search), Variable(target_search)
 
             loss_arch = architect.step(imgs, target, target_en, imgs_search, target_search, target_en_search)
             if (step+1) % 10 == 0:
                 logger.add_scalar('loss_arch/train', loss_arch, epoch*len(pbar)+step)
-                # logger.add_scalar('arch/latency_supernet', architect.latency_supernet, epoch*len(pbar)+step)
 
-        ce_loss, re_loss, kl_loss, preds = model(input=imgs, target=target, target_de=target_en, pretrain=pretrain)
-        # logger.add_graph(model.module,(imgs,target_en))
-        # print(ce_loss)
-        # print(re_loss)
-        # print(kl_loss)
-        c, batch_count = cal_acc(preds, target)
-        c8 += c[2]
-        c16 += c[1]
-        c32 += c[0]
-        cfinal += c[3]
-        total += batch_count
-        ce_loss = torch.mean(ce_loss)
-        re_loss = torch.mean(re_loss)
-        kl_loss = torch.mean(kl_loss)
-        # latent_distance = torch.mean(latent_distance)
-        epoch_ce_loss += ce_loss
-        epoch_re_loss += re_loss
-        epoch_kl_loss += kl_loss
-        # print("The training loss of this batch is: {}".format(loss))
-        logger.add_scalar('loss_step/train_ce', ce_loss, epoch*len(pbar)+step)
-        logger.add_scalar('loss_step/train_re', re_loss, epoch * len(pbar) + step)
-        logger.add_scalar('loss_step/train_kl', kl_loss, epoch * len(pbar) + step)
-        # logger.add_scalar('loss_step/train_latent', latent_distance, epoch * len(pbar) + step)
-        loss = config.wce * ce_loss + config.wre * re_loss + ((epoch + 1)/config.nepochs) * config.wkl * kl_loss
+        ce_loss, kl_loss, re_loss, contras_loss, predict, predict_test, y_mu, x_re = model(imgs, target, target_en, pretrain)
+
+        rec_loss = (x_re - imgs).pow(2).sum((3, 2, 1))
+
+        loss = ce_loss + re_loss + kl_loss + contras_loss
+        loss = loss.sum()
         loss.backward()
         nn.utils.clip_grad_norm_(model.module.parameters(), config.grad_clip)
         optimizer.step()
-        optimizer.zero_grad()
 
+        ce_loss = torch.mean(ce_loss)
+        re_loss = torch.mean(re_loss)
+        kl_loss = torch.mean(kl_loss)
+        contras_loss = torch.mean(contras_loss)
+        epoch_ce_loss += ce_loss
+        epoch_re_loss += re_loss
+        epoch_kl_loss += kl_loss
+        epoch_contras_loss += contras_loss
+        logger.add_scalar('loss_step/train_ce', ce_loss, epoch*len(pbar)+step)
+        logger.add_scalar('loss_step/train_re', re_loss, epoch * len(pbar) + step)
+        logger.add_scalar('loss_step/train_kl', kl_loss, epoch * len(pbar) + step)
+        logger.add_scalar('loss_step/train_contras', contras_loss, epoch * len(pbar) + step)
         pbar.set_description("[Step %d/%d]" % (step + 1, len(train_loader_model)))
-        count+=1
-        # break
+        count += len(target)
+
+        outlabel = predict.data.max(1)[1]  # get the index of the max log-probability
+        correct_train += outlabel.eq(target.view_as(outlabel)).sum().item()
+
+        cor_fea = y_mu[(outlabel == target)]
+        cor_tar = target[(outlabel == target)]
+        cor_fea = torch.Tensor.cpu(cor_fea).detach().numpy()
+        cor_tar = torch.Tensor.cpu(cor_tar).detach().numpy()
+        rec_loss = torch.Tensor.cpu(rec_loss).detach().numpy()
+
+        with open('%s/train_fea.txt' % config.save, 'ab') as f:
+            np.savetxt(f, cor_fea, fmt='%f', delimiter=' ', newline='\r')
+            f.write(b'\n')
+        with open('%s/train_tar.txt' % config.save, 'ab') as t:
+            np.savetxt(t, cor_tar, fmt='%d', delimiter=' ', newline='\r')
+            t.write(b'\n')
+        with open('%s/train_rec.txt' % config.save, 'ab') as m:
+            np.savetxt(m, rec_loss, fmt='%f', delimiter=' ', newline='\r')
+            m.write(b'\n')
+    train_acc = float(100 * correct_train) / count
     logger.add_scalar('loss_epoch/train_ce', epoch_ce_loss/count, epoch)
     logger.add_scalar('loss_epoch/train_re', epoch_re_loss / count, epoch)
     logger.add_scalar('loss_epoch/train_kl', epoch_kl_loss / count, epoch)
-    logger.add_scalar('train_acc/acc8', c8 / total, epoch)
-    logger.add_scalar('train_acc/acc16', c16 / total, epoch)
-    logger.add_scalar('train_acc/acc32', c32 / total, epoch)
-    logger.add_scalar('train_acc/acc_final', cfinal / total, epoch)
-    print("The training loss of this epoch is: {}".format((epoch_ce_loss+epoch_re_loss+kl_loss)/count))
-    print("The average training accuracy of this epoch is: {}".format( cfinal/ total))
+    logger.add_scalar('loss_epoch/train_contras', epoch_contras_loss / count, epoch)
+    logger.add_scalar('train_acc/train_acc', train_acc, epoch)
+    print('Train_Acc: {}/{} ({:.2f}%)'.format(correct_train, count, train_acc))
     torch.cuda.empty_cache()
     # del loss
     # if update_arch: del loss_arch
 
-def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.device("cuda"), add_scalar = False):
+def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.device("cuda"), add_scalar = True):
     model.eval()
     total_ce_loss = 0
     total_re_loss = 0
     total_kl_loss = 0
-    total_distance = 0
-    c8 = 0
-    c16 = 0
-    c32 = 0
-    cfinal = 0
-    total = 0
-    i = 0
+    total_contras_loss = 0
+    correct_val = 0
+    count = 0
     for data_val, target_val in val_loader:
         # print("Current working on {} batch".format(i))
         target_val_en = torch.Tensor(target_val.shape[0], config.num_classes)
@@ -477,37 +482,39 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         target_val_en.scatter_(1, target_val.view(-1, 1), 1)  # one-hot encoding
         target_val_en = target_val_en.to(device)
         data_val, target_val = data_val.to(device), target_val.to(device)
-        ce_loss, re_loss, kl_loss, preds = model(data_val, target_val, target_val_en)
-        c, batch_count = cal_acc(preds, target_val)
-        c8 += c[2]
-        c16 += c[1]
-        c32 += c[0]
-        cfinal += c[3]
-        total += batch_count
+        data_val, target_val = Variable(data_val), Variable(target_val)
+        count += len(target_val)
+
+        ce_loss, kl_loss, re_loss, contras_loss, predict, predict_test, y_mu, x_re = model(data_val, target_val, target_val_en, config.pretrain)
         ce_loss = torch.mean(ce_loss)
         re_loss = torch.mean(re_loss)
         kl_loss = torch.mean(kl_loss)
-        # latent_distance = torch.mean(latent_distance)
-        # total_distance += latent_distance
-        total_ce_loss += config.wce * ce_loss
-        total_re_loss += config.wre * re_loss
-        total_kl_loss += config.wkl * kl_loss
-        i += 1
-        # print(c_loss)
-        # break
-    total_ce_loss = total_ce_loss / i
-    total_re_loss = total_re_loss / i
-    total_kl_loss = total_kl_loss / i
-    # total_distance = total_distance / i
+        contras_loss = torch.mean(contras_loss)
+        total_ce_loss += ce_loss
+        total_re_loss += re_loss
+        total_kl_loss += kl_loss
+        total_contras_loss += contras_loss
+    total_val_loss = total_ce_loss + total_kl_loss + total_re_loss + total_contras_loss
+    val_loss = total_val_loss / count
+    val_rec = total_re_loss / count
+    val_kl = total_kl_loss / count
+    val_ce = total_ce_loss / count
+    val_contras = total_contras_loss / count
+    vallabel = predict.data.max(1)[1]  # get the index of the max log-probability
+    correct_val += vallabel.eq(target_val.view_as(vallabel)).sum().item()
+    val_acc = float(100 * correct_val) / count
     print("The validation ce loss is: {}".format(total_ce_loss))
     print("The validation re loss is: {}".format(total_re_loss))
     print("The validation kl loss is: {}".format(total_kl_loss))
+    print("The validation contras loss is: {}".format(total_contras_loss))
+    print("The validation total loss is: {}".format(total_val_loss))
     if add_scalar == True:
-        logger.add_scalar('val_acc/acc8', c8 / total, epoch)
-        logger.add_scalar('val_acc/acc16', c16 / total, epoch)
-        logger.add_scalar('val_acc/acc32', c32 / total, epoch)
-        logger.add_scalar('val_acc/acc_final', cfinal / total, epoch)
-        print("The average validation accuracy of this epoch is: {}".format(cfinal / total))
+        logger.add_scalar("val_loss/val_loss_all", val_loss, epoch)
+        logger.add_scalar("val_loss/val_rec_loss", val_rec, epoch)
+        logger.add_scalar("val_loss/val_kl_loss", val_kl, epoch)
+        logger.add_scalar("val_loss/val_ce_loss", val_ce, epoch)
+        logger.add_scalar("val_loss/val_contras_loss", val_contras, epoch)
+        logger.add_scalar("Acc_val", val_acc, epoch)
 
 
     # if FPS:
@@ -515,22 +522,120 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
     #     return total_ce_loss, fps0, fps1
     # else:
     #     return total_ce_loss, total_re_loss, total_kl_loss
-    return total_ce_loss, total_re_loss, total_kl_loss
+    return total_ce_loss, total_re_loss, total_kl_loss, total_contras_loss
 
-# def infer(epoch, model, val_loader, logger, FPS=True):
-#     model.eval()
-#     mIoUs = []
-#     for idx in range(5):
-#         evaluator.out_idx = idx
-#         # _, mIoU = evaluator.run_online()
-#         _, mIoU = evaluator.run_online_multiprocess()
+def test(model, train_loader, val_loader, test_loader, epoch, logger, device=torch.device('cuda')):
+    open('%s/test_fea.txt' % config.save, 'w').close()
+    open('%s/test_tar.txt' % config.save, 'w').close()
+    open('%s/test_pre.txt' % config.save, 'w').close()
+    open('%s/test_rec.txt' % config.save, 'w').close()
 
-#         mIoUs.append(mIoU)
-#     if FPS:
-#         fps0, fps1 = arch_logging(model, config, logger, epoch)
-#         return mIoUs, fps0, fps1
-#     else:
-#         return mIoUs
+    model.eval()
+    total_ce_loss = 0
+    total_re_loss = 0
+    total_kl_loss = 0
+    total_contras_loss = 0
+    correct_val = 0
+    total_num = 0
+
+    for data_val, target_val in val_loader:
+        target_val_en = torch.Tensor(target_val.shape[0], config.num_classes)
+        target_val_en.zero_()
+        target_val_en.scatter_(1, target_val.view(-1, 1), 1)  # one-hot encoding
+        target_val_en = target_val_en.to(device)
+        data_val, target_val = data_val.cuda(), target_val.cuda()
+        with torch.no_grad():
+            data_val, target_val = Variable(data_val), Variable(target_val)
+
+        ce_loss, kl_loss, re_loss, contras_loss, predict, output_val, mu_val, de_val = model(data_val, target_val, target_val_en, config.pretrain)
+
+        total_num += len(target_val)
+
+        total_re_loss += re_loss
+        total_ce_loss += ce_loss
+        total_kl_loss += kl_loss
+        total_contras_loss += contras_loss
+
+        vallabel = predict.data.max(1)[1]  # get the index of the max log-probability
+        correct_val += vallabel.eq(target_val.view_as(vallabel)).sum().item()
+
+        output_val = torch.exp(output_val)
+        prob_val = output_val.max(1)[0]  # get the value of the max probability
+        pre_val = output_val.max(1, keepdim=True)[1]  # get the index of the max log-probability
+        rec_val = (de_val - data_val).pow(2).sum((3, 2, 1))
+        # _, mu_val = torch.split(mu_val, [config.z_dim, config.latent_dim32], dim=1)
+        mu_val = torch.Tensor.cpu(mu_val).detach().numpy()
+        target_val_np = torch.Tensor.cpu(target_val).detach().numpy()
+        pre_val = torch.Tensor.cpu(pre_val).detach().numpy()
+        rec_val = torch.Tensor.cpu(rec_val).detach().numpy()
+
+        with open('%s/test_fea.txt' % config.save, 'ab') as f_val:
+            np.savetxt(f_val, mu_val, fmt='%f', delimiter=' ', newline='\r')
+            f_val.write(b'\n')
+        with open('%s/test_tar.txt' % config.save, 'ab') as t_val:
+            np.savetxt(t_val, target_val_np, fmt='%d', delimiter=' ', newline='\r')
+            t_val.write(b'\n')
+        with open('%s/test_pre.txt' % config.save, 'ab') as p_val:
+            np.savetxt(p_val, pre_val, fmt='%d', delimiter=' ', newline='\r')
+            p_val.write(b'\n')
+        with open('%s/test_rec.txt' % config.save, 'ab') as l_val:
+            np.savetxt(l_val, rec_val, fmt='%f', delimiter=' ', newline='\r')
+            l_val.write(b'\n')
+
+    total_val_loss = total_ce_loss + total_kl_loss + total_re_loss + total_contras_loss
+    val_loss = total_val_loss / total_num
+    val_rec = total_re_loss / total_num
+    val_kl = total_kl_loss / total_num
+    val_ce = total_ce_loss / total_num
+    val_contras = total_contras_loss / total_num
+    val_acc = float(100 * correct_val) / total_num
+    print("The validation ce loss is: {}".format(total_ce_loss))
+    print("The validation re loss is: {}".format(total_re_loss))
+    print("The validation kl loss is: {}".format(total_kl_loss / config.beta))
+    print("The validation contras loss is: {}".format(total_contras_loss))
+    print("The validation total loss is: {}".format(total_val_loss))
+    if True:
+        logger.add_scalar("val_loss/val_loss_all", val_loss, epoch)
+        logger.add_scalar("val_loss/val_rec_loss", val_rec, epoch)
+        logger.add_scalar("val_loss/val_kl_loss", val_kl / config.beta, epoch)
+        logger.add_scalar("val_loss/val_ce_loss", val_ce, epoch)
+        logger.add_scalar("val_loss/val_contras_loss", val_contras, epoch)
+        logger.add_scalar("Acc_val", val_acc, epoch)
+
+    # img_index = 1
+    for data_omn, target_omn in test_loader:
+        tar_omn = torch.from_numpy(config.num_classes * np.ones(target_omn.shape[0]))
+        data_omn = data_omn.cuda()
+        with torch.no_grad():
+            data_omn = Variable(data_omn)
+        # print(data_omn.shape)
+        output_omn, mu_omn, de_omn = model.module.test(data_omn, target_val, target_val_en)
+        output_omn = torch.exp(output_omn)
+        # prob_omn = output_omn.max(1)[0]  # get the value of the max probability
+        pre_omn = output_omn.max(1, keepdim=True)[1]  # get the index of the max log-probability
+        rec_omn = (de_omn - data_omn).pow(2).sum((3, 2, 1))
+        mu_omn = torch.Tensor.cpu(mu_omn).detach().numpy()
+        tar_omn = torch.Tensor.cpu(tar_omn).detach().numpy()
+        pre_omn = torch.Tensor.cpu(pre_omn).detach().numpy()
+        rec_omn = torch.Tensor.cpu(rec_omn).detach().numpy()
+
+        with open('%s/test_fea.txt' % config.save, 'ab') as f_test:
+            np.savetxt(f_test, mu_omn, fmt='%f', delimiter=' ', newline='\r')
+            f_test.write(b'\n')
+        with open('%s/test_tar.txt' % config.save, 'ab') as t_test:
+            np.savetxt(t_test, tar_omn, fmt='%d', delimiter=' ', newline='\r')
+            t_test.write(b'\n')
+        with open('%s/test_pre.txt' % config.save, 'ab') as p_test:
+            np.savetxt(p_test, pre_omn, fmt='%d', delimiter=' ', newline='\r')
+            p_test.write(b'\n')
+        with open('%s/test_rec.txt' % config.save, 'ab') as l_test:
+            np.savetxt(l_test, rec_omn, fmt='%f', delimiter=' ', newline='\r')
+            l_test.write(b'\n')
+
+    perf = ocr_test(config, model, train_loader, val_loader, test_loader)
+    print("The f1 score is {}".format(perf[-1]))
+    logger.add_scalar("val_perf/val_f1", perf[-1], epoch)
+    return perf[-1], total_val_loss, val_acc
 
 
 def arch_logging(model, args, logger, epoch):
@@ -576,10 +681,14 @@ def arch_logging(model, args, logger, epoch):
 def cal_acc(preds, target):
     c = [0, 0, 0, 0]
     i = 0
-    for pred in preds:
-        pred = pred.data.max(1)[1]
-        c[i] += pred.eq(target.view_as(pred)).sum().item()
-        i += 1
+    if len(preds) == 1:
+        preds = preds[0].data.max(1)[1]
+        c[0] += preds.eq(target.view_as(preds)).sum().item()
+    else:
+        for pred in preds:
+            pred = pred.data.max(1)[1]
+            c[i] += pred.eq(target.view_as(pred)).sum().item()
+            i += 1
     return c, len(target)
 
 if __name__ == '__main__':

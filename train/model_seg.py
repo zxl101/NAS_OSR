@@ -2,17 +2,29 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.autograd import Variable
 from operations import *
 from genotypes import PRIMITIVES
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import os
+from PIL import Image
 from pdb import set_trace as bp
 
 # from seg_oprs import FeatureFusion, Head
 
 BatchNorm2d = nn.BatchNorm2d
 
+def kl_normal(qm, qv, pm, pv, yh):
+	element_wise = 0.5 * (torch.log(pv) - torch.log(qv) + qv / pv + (qm - pm - yh).pow(2) / pv - 1)
+	# element_wise = 0.5 * (torch.log(pv) - torch.log(qv) - qv / pv - (qm - pm - yh).pow(2) / pv - 1)
+	kl = element_wise.sum(-1)
+	#print("log var1", qv)
+	return torch.mean(kl)
 
 def sample_gaussian(m, v):
     sample = torch.randn(m.shape).to(torch.device("cuda"))
+    # sample = torch.randn(m.shape)
     m = m.cuda()
     v = v.cuda()
     z = m + (v ** 0.5) * sample
@@ -23,113 +35,88 @@ def softmax(x):
     return np.exp(x) / (np.exp(x).sum() + np.spacing(1))
 
 class TCONV(nn.Module):
-    def __init__(self, in_size, unflat_dim, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride, out_dim, t_latent_dim, outpadding = 0):
+    def __init__(self, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride, outpadding = 0):
         super(TCONV, self).__init__()
-        self.in_size = in_size
-        self.unflat_dim = unflat_dim
         self.t_in_ch = t_in_ch
         self.t_out_ch = t_out_ch
         self.t_kernel = t_kernel
         self.t_stride = t_stride
         self.t_padding = t_padding
-        self.out_dim = out_dim
-        self.t_latent_dim = t_latent_dim
         self.weight = 1
         self.bias = 0
         self.outpadding = outpadding
 
-        self.fc = nn.Linear(in_size, t_in_ch * unflat_dim * unflat_dim)
         self.net = nn.Sequential(
 
             nn.ConvTranspose2d(t_in_ch, t_out_ch, kernel_size=t_kernel, padding=t_padding, stride=t_stride, output_padding=self.outpadding),  # (w-k+2p)/s+1
             nn.BatchNorm2d(t_out_ch),
-            nn.LeakyReLU(),
-        )
-        self.mean_layer = nn.Sequential(
-            nn.Linear(t_out_ch*out_dim*out_dim, t_latent_dim)
-        )
-        self.var_layer = nn.Sequential(
-            nn.Linear(t_out_ch*out_dim*out_dim, t_latent_dim)
+            nn.PReLU(),
         )
 
     def decode(self, x):
-        x = self.fc(x)
-        x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
         h = self.net(x)
-        h_flat = h.view(-1, self.t_out_ch * self.out_dim * self.out_dim)
-        mu, var = self.mean_layer(h_flat), self.var_layer(h_flat)
-        var = F.softplus(var) + 1e-8
-        return h, mu, var
-
-    def decode2(self, x):
-        h = self.net(x)
+        # mu, var = ut.gaussian_parameters(h, dim=1)
         return h
 
 
 class FCONV(nn.Module):
-    def __init__(self, in_size, unflat_dim, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride):
+    def __init__(self, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride):
         super(FCONV, self).__init__()
-        self.in_size = in_size
-        self.unflat_dim = unflat_dim
+
         self.t_in_ch = t_in_ch
         self.t_out_ch = t_out_ch
         self.t_kernel = t_kernel
         self.t_stride = t_stride
         self.t_padding = t_padding
 
-        self.fc_final = nn.Linear(in_size, t_in_ch * unflat_dim * unflat_dim)
+
         self.final = nn.Sequential(
-            # nn.PReLU(),
+            nn.PReLU(),
             nn.ConvTranspose2d(t_in_ch, t_out_ch, kernel_size=t_kernel, padding=t_padding, stride=t_stride),  # (w-k+2p)/s+1
             #nn.Sigmoid()
             nn.Tanh()
         )
 
     def final_decode(self,x):
-        x = self.fc_final(x)
-        x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
-        x_re = self.final(x)
-        return x_re
-    def final_decode2(self,x):
         # x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
         x_re = self.final(x)
         return x_re
 
-class DoubleConv(nn.Module):
-
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
-        )
-
-    def forward(self, x):
-        return self.double_conv(x)
-
-class Up(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.up = nn.ConvTranspose2d(in_channels, in_channels//2, kernel_size=2, stride=2)
-        self.conv = DoubleConv(in_channels, out_channels)
-        self.conv2 = DoubleConv(in_channels//2, out_channels)
-
-    def forward(self, x1, x2=None):
-        if x1 is None:
-            return self.conv2(x2)
-        x1 = self.up(x1)
-
-        if x2 is not None:
-            x = torch.cat([x2, x1], dim =1)
-            return self.conv(x)
-        else:
-            x = x1
-            return self.conv2(x)
-        # return self.conv(x)
+# class DoubleConv(nn.Module):
+#
+#     def __init__(self, in_channels, out_channels):
+#         super().__init__()
+#         self.double_conv = nn.Sequential(
+#             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(out_channels),
+#             nn.ReLU(inplace=True),
+#             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(out_channels),
+#             nn.ReLU(inplace=True)
+#         )
+#
+#     def forward(self, x):
+#         return self.double_conv(x)
+#
+# class Up(nn.Module):
+#     def __init__(self, in_channels, out_channels):
+#         super().__init__()
+#         self.up = nn.ConvTranspose2d(in_channels, in_channels//2, kernel_size=2, stride=2)
+#         self.conv = DoubleConv(in_channels, out_channels)
+#         self.conv2 = DoubleConv(in_channels//2, out_channels)
+#
+#     def forward(self, x1, x2=None):
+#         if x1 is None:
+#             return self.conv2(x2)
+#         x1 = self.up(x1)
+#
+#         if x2 is not None:
+#             x = torch.cat([x2, x1], dim =1)
+#             return self.conv(x)
+#         else:
+#             x = x1
+#             return self.conv2(x)
+#         # return self.conv(x)
 def path2downs(path):
     '''
     0 same 1 down
@@ -212,28 +199,40 @@ def alphas2ops_path_width(alphas, path, widths):
         path_compact.append(scale)
         if i < len(widths): widths_compact.append(width)
         ops.append(op)
-    assert len(path_compact) >= min_len
+    # print(len(path_compact))
+    # print(min_len)
+    # assert len(path_compact) >= min_len
     return ops, path_compact, widths_compact
 
 
 def betas2path(betas, last, layers):
+
     downs = [0] * layers
     # betas1 is of length layers-2; beta2: layers-3; beta3: layers-4
     if last == 1:
-        down_idx = np.argmax([beta[0] for beta in betas[1][1:-1].cpu().numpy()]) + 1
-        downs[down_idx] = 1
+        # print(betas[1].shape)
+        if betas[1].shape[0] == 1:
+            downs[0] = 1
+        else:
+            down_idx = np.argmax([beta[0] for beta in betas[1][1:-1].cpu().numpy()]) + 1
+            downs[down_idx] = 1
     elif last == 2:
-        max_prob = 0;
-        max_ij = (0, 1)
-        for j in range(layers - 4):
-            for i in range(1, j - 1):
-                prob = betas[1][i][0] * betas[2][j][0]
-                if prob > max_prob:
-                    max_ij = (i, j)
-                    max_prob = prob
-        downs[max_ij[0] + 1] = 1;
-        downs[max_ij[1] + 2] = 1
+        if betas[2].shape[0] <= 1:
+            downs[0] = 1
+            downs[1] = 1
+        else:
+            max_prob = 0;
+            max_ij = (0, 1)
+            for j in range(layers - 4):
+                for i in range(1, j - 1):
+                    prob = betas[1][i][0] * betas[2][j][0]
+                    if prob > max_prob:
+                        max_ij = (i, j)
+                        max_prob = prob
+            downs[max_ij[0] + 1] = 1;
+            downs[max_ij[1] + 2] = 1
     path = downs2path(downs)
+    # print(path)
     assert path[-1] == last
     return path
 
@@ -310,10 +309,11 @@ class Cell(nn.Module):
 
 
 class Network_Multi_Path_Infer(nn.Module):
-    def __init__(self, alphas, betas, ratios, num_classes=10, in_channel=3, layers=9,
+    def __init__(self, alphas, betas, ratios, num_classes=6, in_channel=3, layers=6,
                  criterion=nn.CrossEntropyLoss(ignore_index=-1),
-                 Fch=12, width_mult_list=[1., ], stem_head_width=(1., 1.), latent_dim32=32*1,
-                 latent_dim64=64*1, latent_dim128=128*1):
+                 Fch=16, width_mult_list=[1., ], stem_head_width=(1., 1.), latent_dim32=32*1,
+                 latent_dim64=64*1, latent_dim128=128*1, temperature=1, z_dim=10, img_size=64, down_scale_last=4,
+                 skip_connect=True, wcontras=1):
         super(Network_Multi_Path_Infer, self).__init__()
         self._num_classes = num_classes
         assert layers >= 2
@@ -324,6 +324,15 @@ class Network_Multi_Path_Infer(nn.Module):
         self.latent_dim32 = latent_dim32
         self.latent_dim64 = latent_dim64
         self.latent_dim128 = latent_dim128
+        self.temperature = temperature
+        self.z_dim = z_dim
+        self.img_size = img_size
+        self.down_scale_last = down_scale_last
+        self.last_size = self.img_size // (2 ** self.down_scale_last)
+        self.wcontras = wcontras
+
+        self.skip_connect = skip_connect
+
         if ratios[0].size(1) == 1:
             self._width_mult_list = [1., ]
         else:
@@ -331,17 +340,22 @@ class Network_Multi_Path_Infer(nn.Module):
         self._stem_head_width = stem_head_width
         self.latency = 0
 
-        self.stem = nn.Sequential(
-            # ConvNorm(self.in_channel, self.num_filters(2, stem_head_width[0]) * 2, kernel_size=3, stride=2, padding=1,
-            #          bias=False, groups=1, slimmable=False),
-            nn.Conv2d(self.in_channel,self.num_filters(2, stem_head_width[0]) * 2,kernel_size=3, stride=2, padding=1,groups=1, bias=False),
-            nn.BatchNorm2d(self.num_filters(2, stem_head_width[0]) * 2),
-            nn.ReLU(inplace=True),
-            BasicResidual2x(self.num_filters(2, stem_head_width[0]) * 2, self.num_filters(4, stem_head_width[0]) * 2,
-                            kernel_size=3, stride=2, groups=1, slimmable=False),
-            BasicResidual2x(self.num_filters(4, stem_head_width[0]) * 2, self.num_filters(8, stem_head_width[0]),
-                            kernel_size=3, stride=2, groups=1, slimmable=False)
-        )
+        # self.stem = nn.Sequential(
+        #     ConvNorm(self.in_channel, self.num_filters(2, stem_head_width[0]) * 2, kernel_size=3, stride=2, padding=1,
+        #              bias=False, groups=1, slimmable=False),
+        #     BasicResidual2x(self.num_filters(2, stem_head_width[0]) * 2, self.num_filters(4, stem_head_width[0]) * 2,
+        #                     kernel_size=3, stride=2, groups=1, slimmable=False),
+        #     BasicResidual2x(self.num_filters(4, stem_head_width[0]) * 2, self.num_filters(8, stem_head_width[0]),
+        #                     kernel_size=3, stride=2, groups=1, slimmable=False)
+        # )
+
+        self.down1 = ConvNorm(self.in_channel, self.num_filters(4, 1), kernel_size=1, stride=1, padding=0, bias=False,
+                              groups=1, slimmable=False)
+        # self.down1 = nn.Sequential(nn.Conv2d(self.in_channel, self.num_filters(4, 1), kernel_size=3, stride=2, padding=1, bias=False), nn.BatchNorm2d(self.num_filters(4, 1)), nn.PReLU())
+        self.down2 = BasicResidual2x(self.num_filters(4, 1), self.num_filters(8, 1), kernel_size=3, stride=2, groups=1,
+                                     slimmable=False)
+        self.down4 = BasicResidual2x(self.num_filters(8, 1), self.num_filters(16, 1), kernel_size=3, stride=2, groups=1,
+                                     slimmable=False)
 
         self.ops0, self.path0, self.downs0, self.widths0 = network_metas(alphas, betas, ratios, self._width_mult_list,
                                                                          layers, 0)
@@ -353,7 +367,7 @@ class Network_Multi_Path_Infer(nn.Module):
     def num_filters(self, scale, width=1.0):
         return int(np.round(scale * self._Fch * width))
 
-    def build_structure(self, lasts, ladder = False):
+    def build_structure(self, lasts):
         self._branch = len(lasts)
         self.lasts = lasts
         self.ops = [getattr(self, "ops%d" % last) for last in lasts]
@@ -362,67 +376,34 @@ class Network_Multi_Path_Infer(nn.Module):
         self.widths = [getattr(self, "widths%d" % last) for last in lasts]
         self.branch_groups, self.cells = self.get_branch_groups_cells(self.ops, self.paths, self.downs, self.widths,
                                                                       self.lasts)
-        self.build_arm_ffm_head(ladder)
+        self.build_arm_ffm_head()
 
-    def build_arm_ffm_head(self, ladder = False):
+    def build_arm_ffm_head(self):
 
-        self.classifier32 = nn.Linear(self.latent_dim32, self._num_classes)
+
+        self.dec32 = nn.Linear(self.latent_dim32 + self.z_dim, 1024 * self.last_size * self.last_size)
+        self.up32 = TCONV(2048, 512, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+        self.up16 = TCONV(1024, 256, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+        self.up8 = TCONV(512, 128, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+        if self.skip_connect:
+            self.up4 = TCONV(256, 64, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up2 = TCONV(128, 64, t_kernel=1, t_stride=1, t_padding=0, outpadding=0)
+            self.refine1 = FCONV(64, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
+        else:
+            self.up4 = TCONV(128, 64, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up2 = TCONV(64, 32, t_kernel=1, t_stride=1, t_padding=0, outpadding=0)
+            self.refine1 = FCONV(32, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
+
+        self.classifier = nn.Linear(self.latent_dim32, self._num_classes)
+
         self.one_hot32 = nn.Linear(self._num_classes, self.latent_dim32)
 
         self.mean_layer32 = nn.Sequential(
-            nn.Linear(int(384 * 2 * 2), self.latent_dim32)
+            nn.Linear(int(1024 * self.last_size * self.last_size), self.latent_dim32 + self.z_dim)
         )
         self.var_layer32 = nn.Sequential(
-            nn.Linear(int(384 * 2 * 2), self.latent_dim32)
+            nn.Linear(int(1024 * self.last_size * self.last_size), self.latent_dim32 + self.z_dim)
         )
-
-        self.classifier16 = nn.Linear(self.latent_dim64, self._num_classes)
-        self.one_hot16 = nn.Linear(self._num_classes, self.latent_dim64)
-
-        self.mean_layer16 = nn.Sequential(
-            nn.Linear(int(192 * 4 * 4), self.latent_dim64)
-        )
-        self.var_layer16 = nn.Sequential(
-            nn.Linear(int(192 * 4 * 4), self.latent_dim64)
-        )
-
-        self.classifier8 = nn.Linear(self.latent_dim128, self._num_classes)
-        self.one_hot8 = nn.Linear(self._num_classes, self.latent_dim128)
-
-        self.mean_layer8 = nn.Sequential(
-            nn.Linear(int(96 * 8 * 8), self.latent_dim128)
-        )
-        self.var_layer8 = nn.Sequential(
-            nn.Linear(int(96 * 8 * 8), self.latent_dim128)
-        )
-
-        if ladder == False:
-
-            self.refine32 = DoubleConv(384, 384)
-            self.refine16 = Up(384, 192)
-            self.refine8 = Up(192, 192)
-            self.refine4 = Up(192, 96)
-            self.refine2 = Up(96, 48)
-            self.refin1 = Up(48, 24)
-            self.out_layer = nn.Conv2d(24, self.in_channel, kernel_size=1)
-            self.rec = nn.Tanh()
-
-        else:
-            self.TCONV5_2 = TCONV(self.latent_dim32, 2, 512, 512, 2,
-                                  0, 2, 4, self.latent_dim64)
-            self.TCONV4_2 = TCONV(self.latent_dim64, 4, 512, 512, 2,
-                                  0, 2, 8, self.latent_dim128)
-            self.TCONV3_2 = FCONV(self.latent_dim128, 8, 256, 256, 2, 0, 2)
-            self.TCONV2_2 = FCONV(256, 16, 256, 128, 2,
-                                  0, 2)
-            self.TCONV1_2 = FCONV(512, 32, 128, 64, 2,
-                                0, 2)
-            self.TCONV1_1 = FCONV(512, 64, 64, 3, 1,
-                                  0, 1)
-
-        self.fc1 = nn.Linear(30, 30)
-        self.fc2 = nn.Linear(30, 15)
-        self.fc3 = nn.Linear(15, 10)
 
 
     def get_branch_groups_cells(self, ops, paths, downs, widths, lasts):
@@ -435,11 +416,14 @@ class Network_Multi_Path_Infer(nn.Module):
         cells = nn.ModuleDict()  # layer-branch: op
         branch_connections = np.ones(
             (num_branch, num_branch))  # maintain connections of heads of branches of different scales
-
+        # all but the last layer
+        # we determine branch-merging by comparing their next layer: if next-layer differs, then the "down" of current layer must differ
         for l in range(layers):
             connections = np.ones((num_branch, num_branch))  # if branch i/j share same scale & op in this layer
             for i in range(num_branch):
                 for j in range(i + 1, num_branch):
+                    # we also add constraint on ops[i][l] != ops[j][l] since some skip-connect may already be shrinked/compacted => layers of branches may no longer aligned in terms of alphas
+                    # last layer won't merge
                     if len(paths[i]) <= l + 1 or len(paths[j]) <= l + 1 or paths[i][l + 1] != paths[j][l + 1] or ops[i][
                         l] != ops[j][l] or widths[i][l] != widths[j][l]:
                         connections[i, j] = connections[j, i] = 0
@@ -466,7 +450,7 @@ class Network_Multi_Path_Infer(nn.Module):
                                            paths[group[2]][l + 1] and downs[group[1]][l] == downs[group[2]][l] and \
                                            widths[group[1]][l] == widths[group[2]][l]
                 op = ops[group[0]][l]
-                scale = 2 ** (paths[group[0]][l] + 3)
+                scale = 2 ** (paths[group[0]][l] + 3) *2
                 down = downs[group[0]][l]
                 if l < len(paths[group[0]]) - 1: assert down == paths[group[0]][l + 1] - paths[group[0]][l]
                 assert down in [0, 1]
@@ -490,98 +474,359 @@ class Network_Multi_Path_Infer(nn.Module):
             groups_all.append(branch_groups)
         return groups_all, cells
 
-    def agg_ffm(self, outputs8, outputs16, outputs32, label_en, ladder = False , check = None):
+    def agg_ffm(self, outputs, label_en):
+        outputs32 = outputs[4]
+        outputs16 = outputs[3]
+        outputs8 = outputs[2]
+        outputs4 = outputs[1]
+        outputs2 = outputs[0]
+        latent_mu = self.mean_layer32(outputs32.view(-1, 1024 * self.last_size * self.last_size))
+        latent_var = self.var_layer32(outputs32.view(-1, 1024 * self.last_size * self.last_size))
+        latent_var = F.softplus(latent_var) + 1e-8
 
-        out_flat32 = outputs32.view(-1, int(384 * 2 * 2))
-        latent_mu32 = self.mean_layer32(out_flat32)
-        predict32 = F.log_softmax(self.classifier32(latent_mu32), dim=1)
-        # latent_mu32, latent_var32 = self.mean_layer32(out_flat32), self.var_layer32(out_flat32)
-        # latent_var32 = F.softplus(latent_var32) + 1e-8
-        # latent32 = sample_gaussian(latent_mu32, latent_var32)
-        # predict32 = F.log_softmax(self.classifier32(latent32), dim=1)
-        # yh32 = self.one_hot32(label_en)
+        # print(latent_mu.shape)
+        z_mu, y_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+        z_var, y_var = torch.split(latent_var, [self.z_dim, self.latent_dim32], dim=1)
+        z_var = F.softplus(z_var) + 1e-8
+        y_var = F.softplus(y_var) + 1e-8
 
-        # out_flat16 = outputs16.view(-1, int(192 * 4 * 4))
-        # latent_mu16, latent_var16 = self.mean_layer16(out_flat16), self.var_layer16(out_flat16)
-        # latent_var16 = F.softplus(latent_var16) + 1e-8
-        # latent16 = sample_gaussian(latent_mu16, latent_var16)
-        # predict16 = F.log_softmax(self.classifier16(latent16), dim=1)
-        # yh16 = self.one_hot16(label_en)
-        #
-        # out_flat8 = outputs8.view(-1, int(96 * 8 * 8))
-        # latent_mu8, latent_var8 = self.mean_layer8(out_flat8), self.var_layer8(out_flat8)
-        # latent_var8 = F.softplus(latent_var8) + 1e-8
-        # latent8 = sample_gaussian(latent_mu8, latent_var8)
-        # predict8 = F.log_softmax(self.classifier8(latent8), dim=1)
-        # yh8 = self.one_hot8(label_en)
+        y_latent = sample_gaussian(y_mu, y_var)
+        latent = sample_gaussian(latent_mu, latent_var)
+        # print(latent_var)
+        predict = F.log_softmax(self.classifier(y_latent), dim=1)
+        predict_test = F.log_softmax(self.classifier(y_mu), dim=1)
+        yh = self.one_hot32(label_en)
 
-        qmu5_1 = None
-        qvar5_1 = None
-        qmu4_1 = None
-        qvar4_1 = None
-        # if ladder == False:
-        #     out32 = self.refine32(outputs32)
-        #     out16 = self.refine16(out32, outputs16)
-        #     # out8 = self.refine8(None, check)
-        #     out8 = self.refine8(out16, outputs8)
-        #     out4 = self.refine4(out8)
-        #     # out4 = self.refine4(None, check)
-        #     out2 = self.refine2(out4)
-        #     out1 = self.refin1(out2)
-        #     reconstructed = self.rec(self.out_layer(out1))
-        # else:
-        # if True:
-        #     #structural ladder structure
-        #     dec5_1, mu_dn5_1, var_dn5_1 = self.TCONV5_2.decode(latent32)
-        #     prec_up5_1 = latent_var16 ** (-1)
-        #     prec_dn5_1 = var_dn5_1 ** (-1)
-        #     qmu5_1 = (latent_mu16 * prec_up5_1 + mu_dn5_1 * prec_dn5_1) / (prec_up5_1 + prec_dn5_1)
-        #     qvar5_1 = (prec_up5_1 + prec_dn5_1) ** (-1)
-        #     de_latent5_1 = sample_gaussian(qmu5_1, qvar5_1)
-        #
-        #     dec4_1, mu_dn4_1, var_dn4_1 = self.TCONV4_2.decode(de_latent5_1)
-        #     prec_up4_1 = latent_var8 ** (-1)
-        #     prec_dn4_1 = var_dn4_1 ** (-1)
-        #     qmu4_1 = (latent_mu8 * prec_up4_1 + mu_dn4_1 * prec_dn4_1) / (prec_up4_1 + prec_dn4_1)
-        #     qvar4_1 = (prec_up4_1 + prec_dn4_1) ** (-1)
-        #     de_latent4_1 = sample_gaussian(qmu4_1, qvar4_1)
-        #
-        #     dec3_1 = self.TCONV3_2.final_decode(de_latent4_1)
-        #     dec2_1 = self.TCONV2_2.final_decode2(dec3_1)
-        #     dec1_1 = self.TCONV1_2.final_decode2(dec2_1)
-        #     reconstructed = self.TCONV1_1.final_decode2(dec1_1)
-        #
-        #
-        # pred_final = F.log_softmax(self.fc3(self.fc2(self.fc1(torch.cat((predict8,predict16,predict32),dim=1)))),dim=1)
+        decoded = self.dec32(latent)
+        decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
 
-        # return predict32, predict16, predict8, pred_final, reconstructed, \
-        #        [latent_mu32, latent_mu16, latent_mu8], [latent_var32, latent_var16, latent_var8], [yh32, yh16, yh8], [qmu5_1,qvar5_1],[qmu4_1,qvar4_1]
-        return predict32
+        out32 = torch.cat((decoded, outputs32), dim=1)
+        out16 = torch.cat((self.up32.decode(out32), outputs16), dim=1)
+        out8 = torch.cat((self.up16.decode(out16), outputs8), dim=1)
+        if self.skip_connect:
+            out4 = torch.cat((self.up8.decode(out8), outputs4), dim=1)
+            out2 = torch.cat((self.up4.decode(out4), outputs2), dim=1)
+        else:
+            out4 = self.up8.decode(out8)
+            out2 = self.up4.decode(out4)
+        # print(out2.shape)
+        out1 = self.up2.decode(out2)
+        reconstructed = self.refine1.final_decode(out1)
 
-    def forward(self, input, label_en, ladder = False):
+        out = [outputs2, outputs4, outputs8, outputs16, outputs32]
+
+        return latent, latent_mu, latent_var, \
+               predict, predict_test, yh, \
+               reconstructed, outputs
+
+
+    def forward(self, input, label_en):
         _, _, H, W = input.size()
-        stem = self.stem(input)
-        outputs = [stem] * self._branch
-
+        enc2 = self.down1(input)
+        enc4 = self.down2(enc2)
+        enc8 = self.down4(enc4)
+        # stem2 = self.stem[0](input)
+        # print(stem2.shape)
+        # stem2 = self.stem[1](stem2)
+        # print(stem2.shape)
+        # stem2 = self.stem[2](stem2)
+        # print(stem2.shape)
+        outputs = [enc8] * self._branch
+        # print(enc8.shape)
         for layer in range(len(self.branch_groups)):
             for group in self.branch_groups[layer]:
                 output = self.cells[str(layer) + "-" + str(group[0])](outputs[group[0]])
                 scale = int(H // output.size(2))
                 for branch in group:
                     outputs[branch] = output
-                    if scale == 8:
+                    if scale == 4:
                         outputs8 = output
-                    elif scale == 16:
+                    elif scale == 8:
                         outputs16 = output
+                    elif scale == 16:
+                        outputs32 = output
+        # print(outputs8.shape)
+        latent, latent_mu, latent_var, \
+        predict, predict_test, yh, \
+        reconstructed, outputs = self.agg_ffm([enc2, enc4, outputs8,outputs16,outputs32],label_en)
+        return latent, latent_mu, latent_var, predict, predict_test, yh, reconstructed, outputs
+
+    def get_yh(self, y_de):
+        yh = self.one_hot32(y_de)
+        return yh
+
+    def contrastive_loss(self, x, latent_mu, latent_var, out, target, rec_x, img_index=None):
+        """
+        z : batchsize * 10
+        """
+        bs = x.size(0)
+        ### get current yh for each class
+        target_en = torch.eye(self._num_classes)
+        class_yh = self.get_yh(target_en.cuda())  # 6*32
+        # print(class_yh[0])
+        yh_size = class_yh.size(1)
+
+        # neg_class_num = self._num_classes - 1
+        # z_neg = z.unsqueeze(1).repeat(1, neg_class_num, 1)
+        y_all = torch.zeros((bs, self._num_classes, yh_size)).cuda()
+        # y_neg = torch.zeros((bs, neg_class_num, yh_size)).cuda()
+        for i in range(bs):
+            y_sample = [idx for idx in range(self._num_classes) if idx != torch.argmax(target[i])]
+            # y_sample = [idx for idx in range(self._num_classes) if idx != target[i]]
+            y_all[i] = class_yh
+            # y_neg[i] = class_yh[y_sample]
+        # print(y_neg)
+        y_all = class_yh.unsqueeze(0).repeat(bs, 1, 1)
+
+        # zy_neg = torch.cat([z_neg, y_neg], dim=2).view(bs*neg_class_num, z.size(1)+yh_size)
+        # rec_x_neg = self.generate_cf(x, latent_mu, latent_var, out, target, y_neg)
+        rec_x_all = self.generate_cf(x, latent_mu, latent_var, out, target, y_all)
+
+        # rec_x_all = torch.cat([rec_x.unsqueeze(1), rec_x_neg], dim=1)
+        # diff = torch.sum(rec_x_all[0][0] - rec_x_all[0][2])
+        # print(diff)
+        if img_index != None:
+            for i in range(rec_x_all.shape[1]):
+                temp = rec_x_all[0][i]
+                temp = torch.Tensor.cpu(temp).detach().numpy()
+                temp = temp.transpose(1, 2, 0)
+                # temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+                temp = temp * 0.5 + 0.5
+                # temp = temp * 0.3081 + 0.1307
+                # temp = np.reshape(temp, (32, 32))
+                temp = temp * 255
+                temp = temp.astype(np.uint8)
+                img = Image.fromarray(temp)
+                img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, i)))
+        x_expand = x.unsqueeze(1).repeat(1, self._num_classes, 1, 1, 1)
+        neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4)) * self.temperature  # N*(K+1)
+        re = torch.Tensor.cpu(rec_x[0]).detach().numpy()
+        re = re.transpose(1, 2, 0)
+        # temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+        re = re * 0.5 + 0.5
+        # temp = temp * 0.3081 + 0.1307
+        # temp = np.reshape(temp, (32, 32))
+        re = re * 255
+        re = re.astype(np.uint8)
+        img = Image.fromarray(re)
+        img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, "re")))
+        # print(neg_dist)
+        # print(target)
+        contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, target)
+
+        return contrastive_loss_euclidean
+
+
+    def cf_pred(self, x, latent_mu, latent_var, out, target, image_idx=None):
+        """
+        z : batchsize * 10
+        """
+        bs = x.size(0)
+        ### get current yh for each class
+        target_en = torch.eye(self._num_classes)
+        class_yh = self.get_yh(target_en.cuda())  # 6*32
+        # print(class_yh.shape)
+        yh_size = class_yh.size(1)
+
+        # neg_class_num = self._num_classes - 1
+        # z_neg = z.unsqueeze(1).repeat(1, neg_class_num, 1)
+        y_all = torch.zeros((bs, self._num_classes, yh_size)).cuda()
+        for i in range(bs):
+            # y_sample = [idx for idx in range(self._num_classes)]
+            y_all[i] = class_yh
+        # zy_neg = torch.cat([z_neg, y_neg], dim=2).view(bs*neg_class_num, z.size(1)+yh_size)
+        # print(y_all)
+        rec_x_all = self.generate_cf(x, latent_mu, latent_var, out, target, y_all, verbose=False)
+        # neg_idx = [idx for idx in range(self._num_classes) if idx != torch.argmax(target[0])]
+
+        # if image_idx != None:
+        #     for i in range(rec_x_all.shape[1]):
+        #         temp = rec_x_all[0][i]
+        #         temp = torch.Tensor.cpu(temp).detach().numpy()
+        #         temp = temp.transpose(1, 2, 0)
+        #         # temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+        #         temp = temp * 0.5 + 0.5
+        #         # temp = temp * 0.3081 + 0.1307
+        #         # temp = np.reshape(temp, (32, 32))
+        #         temp = temp * 255
+        #         temp = temp.astype(np.uint8)
+        #         img = Image.fromarray(temp)
+        #         img.save(os.path.join("cf_img", "{}_{}.jpeg".format(image_idx, i)))
+        # ori = torch.Tensor.cpu(x[0]).detach().numpy()
+        # ori = ori.transpose(1,2,0)
+        # ori = ori * 0.5 + 0.5
+        # ori = ori * 255
+        # ori = ori.astype(np.uint8)
+        # ori = Image.fromarray(ori)
+        # ori.save(os.path.join("cf_img","{}_{}.jpeg".format(image_idx,"ori")))
+        x_expand = x.unsqueeze(1).repeat(1, self._num_classes, 1, 1, 1)
+        neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4))  # N*(K+1)
+        pred = torch.argmax(neg_dist, dim=1)
+
+        return pred
+
+
+    def regroup_loss(self, latent_mu, out):
+
+        z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+        y_latent_mu = y_latent_mu[torch.randperm(y_latent_mu.size()[0])]
+
+        latent_zy = torch.cat([z_latent_mu, y_latent_mu], dim=1)
+
+        decoded = self.dec32(latent_zy)
+        decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
+        # print(decoded.shape)
+        out32 = torch.cat((decoded, out[4]), dim=1)
+        out16 = torch.cat((self.up32.decode(out32), out[3]), dim=1)
+        out8 = torch.cat((self.up16.decode(out16), out[2]), dim=1)
+        if self.skip_connect:
+            out4 = torch.cat((self.up8.decode(out8), out[1]), dim=1)
+            out2 = torch.cat((self.up4.decode(out4), out[0]), dim=1)
+        else:
+            out4 = self.up8.decode(out8)
+            out2 = self.up4.decode(out4)
+        out1 = self.up2.decode(out2)
+        x_re = self.refine1.final_decode(out1)
+
+        target_en = torch.Tensor(latent_mu.shape[0], self._num_classes)
+        target_en.zero_()
+        target_en = target_en.cuda()
+        # _, latent_mu, _, _, _, _, _, _ = self.forward(x_re, target_en)
+
+        _, _, H, W = x_re.size()
+        enc2 = self.down1(x_re)
+        enc4 = self.down2(enc2)
+        enc8 = self.down4(enc4)
+        outputs = [enc8] * self._branch
+        # print(enc8.shape)
+        for layer in range(len(self.branch_groups)):
+            for group in self.branch_groups[layer]:
+                output = self.cells[str(layer) + "-" + str(group[0])](outputs[group[0]])
+                scale = int(H // output.size(2))
+                for branch in group:
+                    outputs[branch] = output
                     if scale == 32:
                         outputs32 = output
+        latent_mu = self.mean_layer32(outputs32.view(-1, 1024 * self.last_size * self.last_size))
+
+        pv = torch.ones(latent_mu.shape).cuda()
+        qv = torch.ones(latent_mu.shape).cuda()
+        loss = kl_normal(latent_mu, qv, latent_zy, pv, 0)
+
+        return loss
 
 
-        # pred32, pred16, pred8, pred_final, reconstructed,\
-        #     latent_mu, latent_var, yh, up32, up16 = self.agg_ffm(outputs8, outputs16, outputs32, label_en, ladder)
-        pred32 = self.agg_ffm(outputs8, outputs16, outputs32, label_en, ladder)
-        # return pred8, pred16, pred32, pred_final, reconstructed, latent_mu, latent_var, yh, up32, up16
-        return pred32
+
+    def generate_cf(self, x, latent_mu, latent_var, out, y_de, mean_y, verbose=False):
+        """
+        :param x:
+        :param mean_y: list, the class-wise feature y
+        """
+        if mean_y.dim() == 2:
+            class_num = mean_y.size(0)
+        elif mean_y.dim() == 3:
+            class_num = mean_y.size(1)
+        bs = latent_mu.size(0)
+
+        z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+        # z_latent_var, y_latent_var = torch.split(latent_var, [self.z_dim, self.latent_dim32], dim=1)
+
+        z_latent_mu = z_latent_mu.unsqueeze(1).repeat(1, class_num, 1)
+        if mean_y.dim() == 2:
+            y_mu = mean_y.unsqueeze(0).repeat(bs, 1, 1)
+        elif mean_y.dim() == 3:
+            y_mu = mean_y
+        latent_zy = torch.cat([z_latent_mu, y_mu], dim=2).view(bs*class_num, latent_mu.size(1))
+        if verbose:
+            print(latent_zy)
+        # latent = ut.sample_gaussian(mu_latent, var_latent)
+
+        # partially downwards
+        decoded = self.dec32(latent_zy)
+        decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
+        # print(decoded.shape)
+        out32 = torch.cat((decoded, out[4].repeat(class_num, 1,1,1)), dim=1)
+        out16 = torch.cat((self.up32.decode(out32), out[3].repeat(class_num, 1,1,1)), dim=1)
+        out8 = torch.cat((self.up16.decode(out16), out[2].repeat(class_num, 1,1,1)), dim=1)
+        if self.skip_connect:
+            out4 = torch.cat((self.up8.decode(out8), out[1].repeat(class_num, 1,1,1)), dim=1)
+            out2 = torch.cat((self.up4.decode(out4), out[0].repeat(class_num, 1,1,1)), dim=1)
+        else:
+            out4 = self.up8.decode(out8)
+            out2 = self.up4.decode(out4)
+        out1 = self.up2.decode(out2)
+        x_re = self.refine1.final_decode(out1)
+
+        return x_re.view(bs, class_num, *x.size()[1:])
+
+    def rec_loss_cf(self, feature_y_mean, val_loader, test_loader, args):
+        rec_loss_cf_all = []
+        class_num = feature_y_mean.size(0)
+        for data_test, target_test in val_loader:
+            target_test_en = torch.Tensor(target_test.shape[0], args.num_classes)
+            target_test_en.zero_()
+            target_test_en.scatter_(1, target_test.view(-1, 1), 1)  # one-hot encoding
+            target_test_en = target_test_en.cuda()
+            if args.cuda:
+                data_test, target_test = data_test.cuda(), target_test.cuda()
+            with torch.no_grad():
+                data_test, target_test = Variable(data_test), Variable(target_test)
+
+            _, latent_mu, latent_var, _, _, _, _, outputs = self.forward(data_test, target_test_en)
+
+            re_test = self.generate_cf(data_test, latent_mu, latent_var, outputs, target_test_en, feature_y_mean)
+            # print(re_test.shape)
+            data_test_cf = data_test.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
+            rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
+            rec_loss_cf = rec_loss.min(1)[0]
+            rec_loss_cf_all.append(rec_loss_cf)
+
+
+        for data_test, target_test in test_loader:
+            target_test_en = torch.Tensor(target_test.shape[0], args.num_classes)
+            target_test_en.zero_()
+            # target_test_en.scatter_(1, target_test.view(-1, 1), 1)  # one-hot encoding
+            target_test_en = target_test_en.cuda()
+            if args.cuda:
+                data_test, target_test = data_test.cuda(), target_test.cuda()
+            with torch.no_grad():
+                data_test, target_test = Variable(data_test), Variable(target_test)
+
+            _, latent_mu, latent_var, _, _, _, _, outputs = self.forward(data_test, target_test_en)
+
+            re_test = self.generate_cf(data_test, latent_mu, latent_var, outputs, target_test_en, feature_y_mean)
+            data_test_cf = data_test.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
+            rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
+            rec_loss_cf = rec_loss.min(1)[0]
+            rec_loss_cf_all.append(rec_loss_cf)
+
+        rec_loss_cf_all = torch.cat(rec_loss_cf_all, 0)
+        return rec_loss_cf_all
+
+    def rec_loss_cf_train(self, feature_y_mean, train_loader, args):
+        rec_loss_cf_all = []
+        class_num = feature_y_mean.size(0)
+        for data_train, target_train in train_loader:
+            target_train_en = torch.Tensor(target_train.shape[0], args.num_classes)
+            target_train_en.zero_()
+            target_train_en.scatter_(1, target_train.view(-1, 1), 1)  # one-hot encoding
+            target_train_en = target_train_en.cuda()
+            if args.cuda:
+                data_train, target_train = data_train.cuda(), target_train.cuda()
+            with torch.no_grad():
+                data_train, target_train = Variable(data_train), Variable(target_train)
+
+            _, latent_mu, latent_var, _, _, _, _, outputs = self.forward(data_train, target_train_en)
+
+            re_train = self.generate_cf(data_train, latent_mu, latent_var, outputs, target_train_en, feature_y_mean)
+            data_train_cf = data_train.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
+            rec_loss = (re_train - data_train_cf).pow(2).sum((2, 3, 4))
+            rec_loss_cf = rec_loss.min(1)[0]
+            rec_loss_cf_all.append(rec_loss_cf)
+
+        rec_loss_cf_all = torch.cat(rec_loss_cf_all, 0)
+        return rec_loss_cf_all
+
     def forward_latency(self, size):
         _, H, W = size
         latency_total = 0
@@ -637,4 +882,20 @@ class Network_Multi_Path_Infer(nn.Module):
         latency, size = self.heads8.forward_latency(size);
         latency_total += latency
         return latency_total, size
-
+    def latent_space(self, epoch=0, vis = False):
+        class_list = torch.eye(self._num_classes)
+        # print(class_list)
+        # encoded = torch.Tensor(num_class,num_class)
+        # encoded.zero_()
+        # encoded.scatter_(1, class_list.view(-1, 1), 1)
+        encoded = class_list.cuda()
+        class_latent = self.one_hot32(encoded)
+        class_latent = torch.Tensor.cpu(class_latent).detach().numpy()
+        pca = PCA(n_components=2)
+        pca_fea = pca.fit_transform(class_latent)
+        if vis:
+            fig = plt.figure(figsize=(8, 8))
+            ax = fig.add_subplot(1, 1, 1)
+            ax.scatter([x[0] for x in pca_fea], [x[1] for x in pca_fea], s=10)
+            plt.savefig(os.path.join("train_img", "{}.jpg".format(epoch)))
+        return class_latent

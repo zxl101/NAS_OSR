@@ -71,14 +71,14 @@ class ConvNorm(nn.Module):
             self.conv = nn.Sequential(
                 USConv2d(C_in, C_out, kernel_size, stride, padding=self.padding, dilation=dilation, groups=self.groups, bias=bias, width_mult_list=width_mult_list),
                 USBatchNorm2d(C_out, width_mult_list),
-                nn.ReLU(inplace=True),
+                nn.LeakyReLU(inplace=True),
             )
         else:
             self.conv = nn.Sequential(
                 nn.Conv2d(C_in, C_out, kernel_size, stride, padding=self.padding, dilation=dilation, groups=self.groups, bias=bias),
                 # nn.BatchNorm2d(C_out),
                 BatchNorm2d(C_out),
-                nn.ReLU(inplace=True),
+                nn.LeakyReLU(inplace=True),
             )
     
     def set_ratio(self, ratio):
@@ -144,7 +144,7 @@ class BasicResidual1x(nn.Module):
         if self.stride == 2: self.dilation = 1
         self.ratio = (1., 1.)
 
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(inplace=True)
         if slimmable:
             self.conv1 = USConv2d(C_in, C_out, 3, stride, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
@@ -302,7 +302,7 @@ class BasicResidual_downup_1x(nn.Module):
         if self.stride == 2: self.dilation = 1
         self.ratio = (1., 1.)
 
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(inplace=True)
         if slimmable:
             self.conv1 = USConv2d(C_in, C_out, 3, 1, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
@@ -379,7 +379,7 @@ class BasicResidual2x(nn.Module):
         if self.stride == 2: self.dilation = 1
         self.ratio = (1., 1.)
 
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(inplace=True)
         if self.slimmable:
             self.conv1 = USConv2d(C_in, C_out, 3, stride, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
@@ -461,7 +461,7 @@ class BasicResidual_downup_2x(nn.Module):
         if self.stride == 2: self.dilation = 1
         self.ratio = (1., 1.)
 
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(inplace=True)
         if self.slimmable:
             self.conv1 = USConv2d(C_in, C_out, 3, 1, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
@@ -546,9 +546,9 @@ class FactorizedReduce(nn.Module):
         if stride == 1 and slimmable:
             self.conv1 = USConv2d(C_in, C_out, 1, stride=1, padding=0, bias=False, width_mult_list=width_mult_list)
             self.bn = USBatchNorm2d(C_out, width_mult_list)
-            self.relu = nn.ReLU(inplace=True)
+            self.relu = nn.LeakyReLU(inplace=True)
         elif stride == 2:
-            self.relu = nn.ReLU(inplace=True)
+            self.relu = nn.LeakyReLU(inplace=True)
             if slimmable:
                 self.conv1 = USConv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False, width_mult_list=width_mult_list)
                 self.conv2 = USConv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False, width_mult_list=width_mult_list)
@@ -628,18 +628,24 @@ OPS = {
     # 'conv_downup' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual_downup_1x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
     'conv_2x' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual2x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
     # 'conv_2x_downup' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual_downup_2x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
-    'conv5': lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual1x(C_in, C_out, kernel_size=5, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
-    'conv5_2x':  lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual2x(C_in, C_out, kernel_size=5, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
-    'maxpool': lambda C_in, C_out, stride, slimmable, width_mult_list: MaxPool(C_in, C_out, kernel_size=5, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
+    # 'conv5': lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual1x(C_in, C_out, kernel_size=5, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
+    # 'conv5_2x':  lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual2x(C_in, C_out, kernel_size=5, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
+    # 'maxpool': lambda C_in, C_out, stride, slimmable, width_mult_list: MaxPool(C_in, C_out, kernel_size=5, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
+    # 'conv1': lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual1x(C_in, C_out, kernel_size=1, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
+    # 'conv1_2x':  lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual2x(C_in, C_out, kernel_size=1, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
 }
 # OPS_name = ["FactorizedReduce", "BasicResidual1x", "BasicResidual_downup_1x", "BasicResidual2x", "BasicResidual_downup_2x"]
-OPS_name = ["FactorizedReduce", "BasicResidual1x", "BasicResidual2x", "BasicResidual3_1x", "basicResidual3_2x", "MaxPool"]
+# OPS_name = ["FactorizedReduce", "BasicResidual1x", "BasicResidual2x", "BasicResidual5_1x", "basicResidual5_2x", "BasicResidual1_1x", "basicResidual1_2x", "MaxPool"]
+OPS_name = ["FactorizedReduce", "BasicResidual1x", "BasicResidual2x"]
 OPS_Class = OrderedDict()
 OPS_Class['skip'] = FactorizedReduce
 OPS_Class['conv'] = BasicResidual1x
 # OPS_Class['conv_downup'] = BasicResidual_downup_1x
 OPS_Class['conv_2x'] = BasicResidual2x
-OPS_Class['maxpool'] = MaxPool
-OPS_Class['conv5'] = BasicResidual1x
-OPS_Class['conv5_2x'] = BasicResidual2x
+
+# OPS_Class['conv5'] = BasicResidual1x
+# OPS_Class['conv5_2x'] = BasicResidual2x
+# OPS_Class['maxpool'] = MaxPool
+# OPS_Class['conv1'] = BasicResidual1x
+# OPS_Class['conv1_2x'] = BasicResidual2x
 # OPS_Class['conv_2x_downup'] = BasicResidual_downup_2x

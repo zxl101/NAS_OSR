@@ -33,7 +33,7 @@ from slimmable_ops import USConv2d, USBatchNorm2d
 latency_lookup_table = {}
 table_file_name = "latency_lookup_table.npy"
 if osp.isfile(table_file_name):
-    latency_lookup_table = np.load(table_file_name, allow_pickle=True).item()
+    latency_lookup_table = np.load(table_file_name,allow_pickle=True).item()
 
 
 BatchNorm2d = nn.BatchNorm2d
@@ -71,14 +71,14 @@ class ConvNorm(nn.Module):
             self.conv = nn.Sequential(
                 USConv2d(C_in, C_out, kernel_size, stride, padding=self.padding, dilation=dilation, groups=self.groups, bias=bias, width_mult_list=width_mult_list),
                 USBatchNorm2d(C_out, width_mult_list),
-                nn.ReLU(inplace=True),
+                nn.LeakyReLU(inplace=True),
             )
         else:
             self.conv = nn.Sequential(
                 nn.Conv2d(C_in, C_out, kernel_size, stride, padding=self.padding, dilation=dilation, groups=self.groups, bias=bias),
                 # nn.BatchNorm2d(C_out),
                 BatchNorm2d(C_out),
-                nn.ReLU(inplace=True),
+                nn.LeakyReLU(inplace=True),
             )
     
     def set_ratio(self, ratio):
@@ -123,7 +123,7 @@ class ConvNorm(nn.Module):
         return latency, (c_out, h_out, w_out)
 
     def forward(self, x):
-        # assert x.size()[1] == self.C_in, "{} {}".format(x.size()[1], self.C_in)
+        assert x.size()[1] == self.C_in, "{} {}".format(x.size()[1], self.C_in)
         x = self.conv(x)
         return x
 
@@ -144,7 +144,7 @@ class BasicResidual1x(nn.Module):
         if self.stride == 2: self.dilation = 1
         self.ratio = (1., 1.)
 
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(inplace=True)
         if slimmable:
             self.conv1 = USConv2d(C_in, C_out, 3, stride, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
@@ -199,6 +199,92 @@ class BasicResidual1x(nn.Module):
         out = self.relu(out)
         return out
 
+class MaxPool(nn.Module):
+    def __init__(self, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1, slimmable=True, width_mult_list=[1.]):
+        super(MaxPool, self).__init__()
+        self.C_in = C_in
+        self.C_out = C_out
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.dilation = dilation
+        self.groups = groups
+        self.slimmable = slimmable
+        self.width_mult_list = width_mult_list
+        assert stride in [1, 2]
+        if self.stride == 2:
+            self.dilation = 1
+        self.ratio = (1., 1.)
+        if slimmable:
+            self.conv = USConv2d(C_in, C_out, 1, 1, padding=0, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
+            self.bn = USBatchNorm2d(C_out, width_mult_list)
+        else:
+            self.conv = nn.Conv2d(C_in, C_out, 1, 1, padding=0, dilation=dilation, groups=groups, bias=False)
+            self.bn = BatchNorm2d(C_out)
+        if self.stride == 1:
+            self.maxpool = nn.MaxPool2d(kernel_size=2, stride=stride, padding=1, dilation=dilation)
+        else:
+            self.maxpool = nn.MaxPool2d(kernel_size=2, stride=stride, padding=1, dilation=dilation)
+
+    def set_ratio(self, ratio):
+        assert len(ratio) == 2
+        self.ratio = ratio
+        self.conv.set_ratio(ratio)
+        self.bn.set_ratio(ratio[1])
+
+    @staticmethod
+    def _flops(h, w, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1):
+        assert stride in [1, 2]
+        layer = MaxPool(C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False)
+        flops, params = profile(layer, inputs=(torch.randn(1, C_in, h, w),), verbose=False)
+        return flops
+
+    @staticmethod
+    def _latency(h, w, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1):
+        assert stride in [1, 2]
+        layer = MaxPool(C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False)
+        latency = compute_latency(layer, (1, C_in, h, w))
+        return latency
+
+    def forward_latency(self, size):
+        c_in, h_in, w_in = size
+        if self.slimmable:
+            assert c_in == int(self.C_in * self.ratio[0]), "c_in %d, int(self.C_in * self.ratio[0]) %d" % (
+            c_in, int(self.C_in * self.ratio[0]))
+            c_out = int(self.C_out * self.ratio[1])
+        else:
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
+            c_out = self.C_out
+        if self.stride == 1:
+            h_out = h_in;
+            w_out = w_in
+        else:
+            h_out = h_in // 2;
+            w_out = w_in // 2
+        name = "MaxPool_H%d_W%d_Cin%d_Cout%d_stride%d_dilation%d" % (
+        h_in, w_in, c_in, c_out, self.stride, self.dilation)
+        if name in latency_lookup_table:
+            latency = latency_lookup_table[name]
+        else:
+            print("not found in latency_lookup_table:", name)
+            latency = MaxPool._latency(h_in, w_in, c_in, c_out, self.kernel_size, self.stride,
+                                                       self.dilation, self.groups)
+            latency_lookup_table[name] = latency
+            np.save(table_file_name, latency_lookup_table)
+        return latency, (c_out, h_out, w_out)
+
+    def forward(self, x):
+        # print("Input Shape")
+        # print(x.shape)
+        out = self.conv(x)
+        # print("Conv outputshape")
+        # print(out.shape)
+        out = self.bn(out)
+        out = self.maxpool(out)
+        # print("Maxpool shape")
+        # print(out.shape)
+        return out
+
+
 
 class BasicResidual_downup_1x(nn.Module):
     def __init__(self, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1, slimmable=True, width_mult_list=[1.]):
@@ -216,7 +302,7 @@ class BasicResidual_downup_1x(nn.Module):
         if self.stride == 2: self.dilation = 1
         self.ratio = (1., 1.)
 
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(inplace=True)
         if slimmable:
             self.conv1 = USConv2d(C_in, C_out, 3, 1, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
@@ -293,8 +379,7 @@ class BasicResidual2x(nn.Module):
         if self.stride == 2: self.dilation = 1
         self.ratio = (1., 1.)
 
-        self.relu = nn.ReLU(inplace=True)
-        self.relu2 = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(inplace=True)
         if self.slimmable:
             self.conv1 = USConv2d(C_in, C_out, 3, stride, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
@@ -356,7 +441,7 @@ class BasicResidual2x(nn.Module):
         out = self.relu(out)
         out = self.conv2(out)
         out = self.bn2(out)
-        out = self.relu2(out)
+        out = self.relu(out)
         return out
 
 
@@ -376,7 +461,7 @@ class BasicResidual_downup_2x(nn.Module):
         if self.stride == 2: self.dilation = 1
         self.ratio = (1., 1.)
 
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(inplace=True)
         if self.slimmable:
             self.conv1 = USConv2d(C_in, C_out, 3, 1, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
@@ -461,9 +546,9 @@ class FactorizedReduce(nn.Module):
         if stride == 1 and slimmable:
             self.conv1 = USConv2d(C_in, C_out, 1, stride=1, padding=0, bias=False, width_mult_list=width_mult_list)
             self.bn = USBatchNorm2d(C_out, width_mult_list)
-            self.relu = nn.ReLU(inplace=True)
+            self.relu = nn.LeakyReLU(inplace=True)
         elif stride == 2:
-            self.relu = nn.ReLU(inplace=True)
+            self.relu = nn.LeakyReLU(inplace=True)
             if slimmable:
                 self.conv1 = USConv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False, width_mult_list=width_mult_list)
                 self.conv2 = USConv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False, width_mult_list=width_mult_list)
@@ -543,11 +628,23 @@ OPS = {
     # 'conv_downup' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual_downup_1x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
     'conv_2x' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual2x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
     # 'conv_2x_downup' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual_downup_2x(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
+    'conv5': lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual1x(C_in, C_out, kernel_size=5, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
+    'conv5_2x':  lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual2x(C_in, C_out, kernel_size=5, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
+    'maxpool': lambda C_in, C_out, stride, slimmable, width_mult_list: MaxPool(C_in, C_out, kernel_size=5, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
+    'conv1': lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual1x(C_in, C_out, kernel_size=1, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
+    'conv1_2x':  lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual2x(C_in, C_out, kernel_size=1, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
 }
-OPS_name = ["FactorizedReduce", "BasicResidual1x", "BasicResidual_downup_1x", "BasicResidual2x", "BasicResidual_downup_2x"]
+# OPS_name = ["FactorizedReduce", "BasicResidual1x", "BasicResidual_downup_1x", "BasicResidual2x", "BasicResidual_downup_2x"]
+OPS_name = ["FactorizedReduce", "BasicResidual1x", "BasicResidual2x", "BasicResidual5_1x", "basicResidual5_2x", "BasicResidual1_1x", "basicResidual1_2x", "MaxPool"]
 OPS_Class = OrderedDict()
 OPS_Class['skip'] = FactorizedReduce
 OPS_Class['conv'] = BasicResidual1x
 # OPS_Class['conv_downup'] = BasicResidual_downup_1x
 OPS_Class['conv_2x'] = BasicResidual2x
+
+OPS_Class['conv5'] = BasicResidual1x
+OPS_Class['conv5_2x'] = BasicResidual2x
+OPS_Class['maxpool'] = MaxPool
+OPS_Class['conv1'] = BasicResidual1x
+OPS_Class['conv1_2x'] = BasicResidual2x
 # OPS_Class['conv_2x_downup'] = BasicResidual_downup_2x

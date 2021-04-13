@@ -19,6 +19,21 @@ reconstruction_function = nn.MSELoss()
 reconstruction_function.size_average = False
 nllloss = nn.NLLLoss()
 
+class DeterministicWarmup(object):
+    def __init__(self, n=100, t_max=1):
+        self.t = 0
+        self.t_max = t_max
+        self.inc = 1 / n
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        t = self.t + self.inc
+
+        self.t = self.t_max if t > self.t_max else t  # 0->1
+        return self.t
+
 # https://github.com/YongfeiYan/Gumbel_Softmax_VAE/blob/master/gumbel_softmax_vae.py
 def sample_gumbel(shape, eps=1e-20):
     U = torch.rand(shape)
@@ -55,88 +70,58 @@ def gumbel_softmax(logits, temperature=1, hard=False):
 # from cgdl
 def sample_gaussian(m, v):
     sample = torch.randn(m.shape).cuda()
-    # sample = torch.randn(m.shape)
     z = m + (v**0.5)*sample
     return z
 
 def kl_normal(qm, qv, pm, pv, yh):
 	element_wise = 0.5 * (torch.log(pv) - torch.log(qv) + qv / pv + (qm - pm - yh).pow(2) / pv - 1)
 	kl = element_wise.sum(-1)
-	#print("log var1", qv)
 	return kl
 
 class TCONV(nn.Module):
-    def __init__(self, in_size, unflat_dim, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride, out_dim, t_latent_dim, outpadding = 0):
+    def __init__(self, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride, outpadding = 0):
         super(TCONV, self).__init__()
-        self.in_size = in_size
-        self.unflat_dim = unflat_dim
         self.t_in_ch = t_in_ch
         self.t_out_ch = t_out_ch
         self.t_kernel = t_kernel
         self.t_stride = t_stride
         self.t_padding = t_padding
-        self.out_dim = out_dim
-        self.t_latent_dim = t_latent_dim
         self.weight = 1
         self.bias = 0
         self.outpadding = outpadding
 
-        self.fc = nn.Linear(in_size, t_in_ch * unflat_dim * unflat_dim)
         self.net = nn.Sequential(
 
             nn.ConvTranspose2d(t_in_ch, t_out_ch, kernel_size=t_kernel, padding=t_padding, stride=t_stride, output_padding=self.outpadding),  # (w-k+2p)/s+1
             nn.BatchNorm2d(t_out_ch),
-            nn.LeakyReLU(),
-        )
-        self.mean_layer = nn.Sequential(
-            nn.Linear(t_out_ch*out_dim*out_dim, t_latent_dim)
-        )
-        self.var_layer = nn.Sequential(
-            nn.Linear(t_out_ch*out_dim*out_dim, t_latent_dim)
+            nn.PReLU(),
         )
 
     def decode(self, x):
-        x = self.fc(x)
-        x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
-        # print(x.shape)
         h = self.net(x)
-        # print(h.shape)
-        h_flat = h.view(-1, self.t_out_ch * self.out_dim * self.out_dim)
-        mu, var = self.mean_layer(h_flat), self.var_layer(h_flat)
-        var = F.softplus(var) + 1e-8
         # mu, var = ut.gaussian_parameters(h, dim=1)
-        return h, mu, var
-
-    def decode2(self, x):
-        h = self.net(x)
         return h
 
 
 class FCONV(nn.Module):
-    def __init__(self, in_size, unflat_dim, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride):
+    def __init__(self, t_in_ch, t_out_ch, t_kernel, t_padding, t_stride):
         super(FCONV, self).__init__()
-        self.in_size = in_size
-        self.unflat_dim = unflat_dim
+
         self.t_in_ch = t_in_ch
         self.t_out_ch = t_out_ch
         self.t_kernel = t_kernel
         self.t_stride = t_stride
         self.t_padding = t_padding
 
-        self.fc_final = nn.Linear(in_size, t_in_ch * unflat_dim * unflat_dim)
+
         self.final = nn.Sequential(
-            # nn.PReLU(),
+            nn.PReLU(),
             nn.ConvTranspose2d(t_in_ch, t_out_ch, kernel_size=t_kernel, padding=t_padding, stride=t_stride),  # (w-k+2p)/s+1
             #nn.Sigmoid()
             nn.Tanh()
         )
 
     def final_decode(self,x):
-        x = self.fc_final(x)
-        x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
-        x_re = self.final(x)
-        return x_re
-    def final_decode2(self,x):
         # x = x.view(-1, self.t_in_ch, self.unflat_dim, self.unflat_dim)
         x_re = self.final(x)
         return x_re
@@ -254,9 +239,9 @@ class Cell(nn.Module):
 
 
 class Network_Multi_Path(nn.Module):
-    def __init__(self, num_classes=10, in_channel=3, layers=16, criterion=nn.CrossEntropyLoss(ignore_index=-1), Fch=12,
-                 width_mult_list=[1.,], prun_modes=['arch_ratio',], stem_head_width=[(1., 1.),], latent_dim32 = 32*2,
-                 latent_dim64=64*2, latent_dim128=128*2):
+    def __init__(self, num_classes=10, in_channel=3, layers=16, criterion=nn.CrossEntropyLoss(ignore_index=-1), Fch=16,
+                 width_mult_list=[1.,], prun_modes=['arch_ratio',], stem_head_width=[(1., 1.),], latent_dim32 = 32*1,
+                 latent_dim64=64*1, latent_dim128=128*1, z_dim=10, temperature=1, beta=1, lamda=1, beta_z=1, total_epoch=50):
         super(Network_Multi_Path, self).__init__()
         self._num_classes = num_classes
         assert layers >= 3
@@ -273,94 +258,60 @@ class Network_Multi_Path(nn.Module):
         self.latent_dim64 = latent_dim64
         self.latent_dim128 = latent_dim128
         self.in_channel = in_channel
+        self.z_dim = z_dim
+        self.temperature = temperature
+        self.beta = DeterministicWarmup(total_epoch, beta)
+        self.lamda = lamda
+        self.beta_z = beta_z
 
-
-        self.classifier32 = nn.Linear(self.latent_dim32, self._num_classes)
         self.one_hot32 = nn.Linear(self._num_classes, self.latent_dim32)
 
         self.mean_layer32 = nn.Sequential(
-            nn.Linear(int(384 * 2 * 2), self.latent_dim32)
+            nn.Linear(int(1024 * 2 * 2), self.latent_dim32 + self.z_dim)
         )
         self.var_layer32 = nn.Sequential(
-            nn.Linear(int(384 * 2 * 2), self.latent_dim32)
+            nn.Linear(int(1024 * 2 * 2), self.latent_dim32 + self.z_dim)
         )
 
-        self.classifier16 = nn.Linear(self.latent_dim64, self._num_classes)
-        self.one_hot16 = nn.Linear(self._num_classes, self.latent_dim64)
 
-        self.mean_layer16 = nn.Sequential(
-            nn.Linear(int(192 * 4 * 4), self.latent_dim64)
-        )
-        self.var_layer16 = nn.Sequential(
-            nn.Linear(int(192 * 4 * 4), self.latent_dim64)
-        )
+        # self.stem = nn.ModuleList([
+        #     nn.Sequential(
+        #         ConvNorm(self.in_channel, self.num_filters(4, stem_ratio)*2, kernel_size=3, stride=2, padding=1, bias=False, groups=1, slimmable=False),
+        #         BasicResidual2x(self.num_filters(4, stem_ratio)*2, self.num_filters(8, stem_ratio)*2, kernel_size=3, stride=2, groups=1, slimmable=False),
+        #         BasicResidual2x(self.num_filters(8, stem_ratio)*2, self.num_filters(16, stem_ratio), kernel_size=3, stride=2, groups=1, slimmable=False)
+        #     ) for stem_ratio, _ in self._stem_head_width ])
+        self.down1 = ConvNorm(self.in_channel, self.num_filters(4, 1), kernel_size=1, stride=1, padding=0, bias=False, groups=1, slimmable=False)
+        self.down2 = BasicResidual2x(self.num_filters(4, 1), self.num_filters(8, 1), kernel_size=3, stride=2, groups=1, slimmable=False)
+        self.down4 = BasicResidual2x(self.num_filters(8, 1), self.num_filters(16, 1), kernel_size=3, stride=2, groups=1, slimmable=False)
 
-        self.classifier8 = nn.Linear(self.latent_dim128, self._num_classes)
-        self.one_hot8 = nn.Linear(self._num_classes, self.latent_dim128)
-
-        self.mean_layer8 = nn.Sequential(
-            nn.Linear(int(96 * 8 * 8), self.latent_dim128)
-        )
-        self.var_layer8 = nn.Sequential(
-            nn.Linear(int(96 * 8 * 8), self.latent_dim128)
-        )
-
-        self.stem = nn.ModuleList([
-            nn.Sequential(
-                ConvNorm(self.in_channel, self.num_filters(2, stem_ratio)*2, kernel_size=3, stride=2, padding=1, bias=False, groups=1, slimmable=False),
-                BasicResidual2x(self.num_filters(2, stem_ratio)*2, self.num_filters(4, stem_ratio)*2, kernel_size=3, stride=2, groups=1, slimmable=False),
-                BasicResidual2x(self.num_filters(4, stem_ratio)*2, self.num_filters(8, stem_ratio), kernel_size=3, stride=2, groups=1, slimmable=False)
-            ) for stem_ratio, _ in self._stem_head_width ])
 
         self.cells = nn.ModuleList()
         for l in range(layers):
             cells = nn.ModuleList()
             if l == 0:
                 # first node has only one input (prev cell's output)
-                cells.append(Cell(self.num_filters(8), width_mult_list=width_mult_list, latent_dim=128, flat_dim=4))
+                cells.append(Cell(self.num_filters(16), width_mult_list=width_mult_list, latent_dim=128, flat_dim=4))
             elif l == 1:
-                cells.append(Cell(self.num_filters(8), width_mult_list=width_mult_list, latent_dim=128, flat_dim=4))
-                cells.append(Cell(self.num_filters(16), width_mult_list=width_mult_list, latent_dim=64, flat_dim=2))
+                cells.append(Cell(self.num_filters(16), width_mult_list=width_mult_list, latent_dim=128, flat_dim=4))
+                cells.append(Cell(self.num_filters(32), width_mult_list=width_mult_list, latent_dim=64, flat_dim=2))
             elif l < layers - 1:
-                cells.append(Cell(self.num_filters(8), width_mult_list=width_mult_list, latent_dim=128, flat_dim=4))
-                cells.append(Cell(self.num_filters(16), width_mult_list=width_mult_list, latent_dim=64, flat_dim=2))
-                cells.append(Cell(self.num_filters(32), down=False, width_mult_list=width_mult_list, latent_dim=32, flat_dim=1))
+                cells.append(Cell(self.num_filters(16), width_mult_list=width_mult_list, latent_dim=128, flat_dim=4))
+                cells.append(Cell(self.num_filters(32), width_mult_list=width_mult_list, latent_dim=64, flat_dim=2))
+                cells.append(Cell(self.num_filters(64), down=False, width_mult_list=width_mult_list, latent_dim=32, flat_dim=1))
             else:
-                cells.append(Cell(self.num_filters(8), down=False, width_mult_list=width_mult_list, latent_dim=128, flat_dim=4))
-                cells.append(Cell(self.num_filters(16), down=False, width_mult_list=width_mult_list, latent_dim=64, flat_dim=2))
-                cells.append(Cell(self.num_filters(32), down=False, width_mult_list=width_mult_list, latent_dim=32, flat_dim=1))
+                cells.append(Cell(self.num_filters(16), down=False, width_mult_list=width_mult_list, latent_dim=128, flat_dim=4))
+                cells.append(Cell(self.num_filters(32), down=False, width_mult_list=width_mult_list, latent_dim=64, flat_dim=2))
+                cells.append(Cell(self.num_filters(64), down=False, width_mult_list=width_mult_list, latent_dim=32, flat_dim=1))
             self.cells.append(cells)
 
 
-        # self.refine32 = nn.ModuleList([
-        #     nn.ModuleList([
-        #         ConvNorm(self.num_filters(32, head_ratio), self.num_filters(16, head_ratio), kernel_size=1, bias=False, groups=1, slimmable=False),
-        #         ConvNorm(self.num_filters(32, head_ratio), self.num_filters(16, head_ratio), kernel_size=3, padding=1, bias=False, groups=1, slimmable=False),
-        #         ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=1, bias=False, groups=1, slimmable=False),
-        #         ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=3, padding=1, bias=False, groups=1, slimmable=False)]) for _, head_ratio in self._stem_head_width ])
-        # self.refine16 = nn.ModuleList([
-        #     nn.ModuleList([
-        #         ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=1, bias=False, groups=1, slimmable=False),
-        #         ConvNorm(self.num_filters(16, head_ratio), self.num_filters(8, head_ratio), kernel_size=3, padding=1, bias=False, groups=1, slimmable=False)]) for _, head_ratio in self._stem_head_width ])
-        # self.refine8 = nn.ModuleList([
-        #         ConvNorm(self.num_filters(8, head_ratio), self.num_filters(4, head_ratio), kernel_size=3,
-        #                         padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-        # # self.refine8 = nn.ModuleList([
-        # #     ConvNorm(self.num_filters(8, head_ratio) * 3, self.num_filters(4, head_ratio), kernel_size=3,
-        # #              padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-        # self.refine4 = nn.ModuleList([
-        #         ConvNorm(self.num_filters(4, head_ratio), self.num_filters(2, head_ratio), kernel_size=3,
-        #                         padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-        # self.refine2 = nn.ModuleList([
-        #         ConvNorm(self.num_filters(2, head_ratio), self.num_filters(1, head_ratio), kernel_size=3,
-        #                         padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-        # self.refine1 = nn.ModuleList([
-        #     ConvNorm(self.num_filters(1, head_ratio), self.num_filters(1, head_ratio), kernel_size=3,
-        #              padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-        # self.reconstruct = nn.ModuleList([
-        #         ConvNorm(self.num_filters(1, head_ratio), 3, kernel_size=3,
-        #                         padding=1, bias=False, groups=1, slimmable=False) for _, head_ratio in self._stem_head_width])
-
+        self.dec32 = nn.Linear(self.latent_dim32 + self.z_dim, 1024*2*2)
+        self.up32 = TCONV(2048, 512, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+        self.up16 = TCONV(1024, 256, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+        self.up8 = TCONV(512, 128, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+        self.up4 = TCONV(256, 64, t_kernel=3, t_stride=2 , t_padding=1, outpadding=1)
+        self.up2 = TCONV(128, 64, t_kernel=1, t_stride=1, t_padding=0,outpadding=0)
+        self.refine1 = FCONV(64, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
 
         # contains arch_param names: {"alphas": alphas, "betas": betas, "ratios": ratios}
         self._arch_names = []
@@ -373,35 +324,8 @@ class Network_Multi_Path(nn.Module):
         # switch set of arch if we have more than 1 arch
         self.arch_idx = 0
 
-        self.fc1 = nn.Linear(30, 30)
-        self.fc2 = nn.Linear(30, 15)
-        self.fc3 = nn.Linear(15, 10)
+        self.classifier = nn.Linear(self.latent_dim32, self._num_classes)
 
-        self.TCONV5_2 = TCONV(self.latent_dim32, 2, 512, 512, 2,
-                              0, 2, 4, self.latent_dim64)
-        # self.TCONV5_1 = TCONV(32, 4, 512, 512, 1,
-        #                       0, 1, 4, 64)
-
-        self.TCONV4_2 = TCONV(self.latent_dim64, 4, 512, 512, 2,
-                              0, 2, 8, self.latent_dim128)
-        # self.TCONV4_1 = TCONV(64, 8, 512, 256, 1,
-        #                       0, 1, 8, 128)
-
-        # self.TCONV3_2 = TCONV(128, 8, 256, 256, 2,
-        #                       0, 2, 16, 256)
-        self.TCONV3_2 = FCONV(self.latent_dim128, 8, 256, 256, 2, 0, 2)
-        # self.TCONV3_1 = TCONV(128, 16, 256, 128, 1,
-        #                       0, 1, 16, 256)
-        # self.TCONV2_2 = TCONV(256, 16, 128, 128, 2,
-        #                       0, 2, 32, 512)
-        self.TCONV2_2 = FCONV(256, 16, 256, 128, 2,
-                              0, 2)
-        # self.TCONV1_2 = TCONV(512, 32, 64, 64, 2,
-        #                       0, 2, 64, 512)
-        self.TCONV1_2 = FCONV(512, 32, 128, 64, 2,
-                              0, 2)
-        self.TCONV1_1 = FCONV(512, 64, 64, 3, 1,
-                              0, 1)
     
     def num_filters(self, scale, width=1.0):
         return int(np.round(scale * self._Fch * width))
@@ -466,17 +390,10 @@ class Network_Multi_Path(nn.Module):
                 ratios2_sampled.append(np.random.choice(self._width_mult_list))
             return [ratios0_sampled, ratios1_sampled, ratios2_sampled]
 
-    def _forward(self, input, label, label_en):
+    def _forward(self, input, label_en):
         # out_prev: cell-state
         # index 0: keep; index 1: down
-        stem = self.stem[self.arch_idx]
-        # refine16 = self.refine16[self.arch_idx]
-        # refine32 = self.refine32[self.arch_idx]
-        # refine8 = self.refine8[self.arch_idx]
-        # refine4 = self.refine4[self.arch_idx]
-        # refine2 = self.refine2[self.arch_idx]
-        # refine1 = self.refine1[self.arch_idx]
-        # reconstruct = self.reconstruct[self.arch_idx]
+        # stem = self.stem[self.arch_idx]
 
 
         alphas0 = F.softmax(getattr(self, self._arch_names[self.arch_idx]["alphas"][0]), dim=-1)
@@ -491,7 +408,10 @@ class Network_Multi_Path(nn.Module):
         else:
             ratios = self.sample_prun_ratio(mode=self._prun_modes[self.arch_idx])
 
-        out_prev = [[stem(input), None]] # stem: one cell
+        enc2 = self.down1(input)
+        enc4 = self.down2(enc2)
+        enc8 = self.down4(enc4)
+        out_prev = [[enc8, None]] # stem: one cell
         # i: layer | j: scale
         mu_var_dic = {}
         for i, cells in enumerate(self.cells):
@@ -547,79 +467,40 @@ class Network_Multi_Path(nn.Module):
                         # var = sum(w * var for w, var in zip(betas[j][i-j-1], [var0, var1]))
                         # mu_var_dic["{}_{}".format(i, j)] = [mu, var]
             out_prev = out
-        ###################################
-        # out0 = None; out1 = None; out2 = None
-        out_flat32 = out[2][0].view(-1, int(384*2*2))
-        latent_mu32, latent_var32 = self.mean_layer32(out_flat32), self.var_layer32(out_flat32)
-        latent_var32 = F.softplus(latent_var32) + 1e-8
-        # latent_mu, latent_var = mu_var_dic["{}_{}".format(self._layers-1, 2)]
-        latent32 = sample_gaussian(latent_mu32, latent_var32)
-        predict32 = F.log_softmax(self.classifier32(latent32), dim=1)
-        # print(predict)
-        # predict_test32 = F.log_softmax(self.classifier32(latent_mu), dim=1)
-        yh32 = self.one_hot32(label_en)
 
-        out_flat16 = out[1][0].view(-1, int(192 * 4 * 4))
-        latent_mu16, latent_var16 = self.mean_layer16(out_flat16), self.var_layer16(out_flat16)
-        latent_var16 = F.softplus(latent_var16) + 1e-8
-        # latent_mu, latent_var = mu_var_dic["{}_{}".format(self._layers-1, 2)]
-        latent16 = sample_gaussian(latent_mu16, latent_var16)
-        predict16 = F.log_softmax(self.classifier16(latent16), dim=1)
-        # print(predict)
-        # predict_test16 = F.log_softmax(self.classifier16(latent_mu), dim=1)
-        yh16 = self.one_hot16(label_en)
+        latent_mu = self.mean_layer32(out[2][0].view(-1,1024*2*2))
+        latent_var = self.var_layer32(out[2][0].view(-1,1024*2*2))
+        latent_var = F.softplus(latent_var) + 1e-8
 
-        out_flat8 = out[0][0].view(-1, int(96 * 8 * 8))
-        latent_mu8, latent_var8 = self.mean_layer8(out_flat8), self.var_layer8(out_flat8)
-        latent_var8 = F.softplus(latent_var8) + 1e-8
-        # latent_mu, latent_var = mu_var_dic["{}_{}".format(self._layers-1, 2)]
-        latent8 = sample_gaussian(latent_mu8, latent_var8)
-        predict8 = F.log_softmax(self.classifier8(latent8), dim=1)
-        # print(predict)
-        # predict_test8 = F.log_softmax(self.classifier8(latent_mu), dim=1)
-        yh8 = self.one_hot8(label_en)
+        # print(latent_mu.shape)
+        z_mu, y_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+        z_var, y_var = torch.split(latent_var, [self.z_dim, self.latent_dim32], dim=1)
+        z_var = F.softplus(z_var) + 1e-8
+        y_var = F.softplus(y_var) + 1e-8
 
+        y_latent = sample_gaussian(y_mu, y_var)
+        latent = sample_gaussian(latent_mu, latent_var)
+        # print(latent_var)
+        predict = F.log_softmax(self.classifier(y_latent), dim=1)
+        predict_test = F.log_softmax(self.classifier(y_mu), dim=1)
+        yh = self.one_hot32(label_en)
 
-        qmu5_1 = None
-        qvar5_1 = None
-        qmu4_1 = None
-        qvar4_1 = None
+        decoded = self.dec32(latent)
+        decoded = decoded.view(-1, 1024, 2, 2)
 
-        # structural ladder structure
-        dec5_1, mu_dn5_1, var_dn5_1 = self.TCONV5_2.decode(latent32)
-        prec_up5_1 = latent_var16 ** (-1)
-        prec_dn5_1 = var_dn5_1 ** (-1)
-        qmu5_1 = (latent_mu16 * prec_up5_1 + mu_dn5_1 * prec_dn5_1) / (prec_up5_1 + prec_dn5_1)
-        qvar5_1 = (prec_up5_1 + prec_dn5_1) ** (-1)
-        de_latent5_1 = sample_gaussian(qmu5_1, qvar5_1)
+        # print(decoded.shape)
+        # print(out[2][0].shape)
+        out32 = torch.cat((decoded, out[2][0]), dim=1)
+        out16 = torch.cat((self.up32.decode(out32), out[1][0]), dim=1)
+        out8 = torch.cat((self.up16.decode(out16), out[0][0]), dim=1)
+        out4 = torch.cat((self.up8.decode(out8), enc4), dim=1)
+        out2 = torch.cat((self.up4.decode(out4), enc2), dim=1)
+        out1 = self.up2.decode(out2)
+        reconstructed = self.refine1.final_decode(out1)
 
-        dec4_1, mu_dn4_1, var_dn4_1 = self.TCONV4_2.decode(de_latent5_1)
-        prec_up4_1 = latent_var8 ** (-1)
-        prec_dn4_1 = var_dn4_1 ** (-1)
-        qmu4_1 = (latent_mu8 * prec_up4_1 + mu_dn4_1 * prec_dn4_1) / (prec_up4_1 + prec_dn4_1)
-        qvar4_1 = (prec_up4_1 + prec_dn4_1) ** (-1)
-        de_latent4_1 = sample_gaussian(qmu4_1, qvar4_1)
-
-        dec3_1 = self.TCONV3_2.final_decode(de_latent4_1)
-        # print(dec3_1.shape)
-        dec2_1 = self.TCONV2_2.final_decode2(dec3_1)
-        # print(dec2_1.shape)
-        dec1_1 = self.TCONV1_2.final_decode2(dec2_1)
-        # print(dec1_1.shape)
-        reconstructed = self.TCONV1_1.final_decode2(dec1_1)
-        # print(reconstructed.shape)
-
-        pred_final = F.log_softmax(self.fc3(self.fc2(self.fc1(torch.cat((predict8, predict16, predict32), dim=1)))),
-                                   dim=1)
-
-
-        latent_mu = [latent_mu32,latent_mu16,latent_mu8]
-        latent_var = [latent_var32,latent_var16,latent_var8]
-        yh = [yh32,yh16,yh8]
-        predict = [predict32,predict16,predict8, pred_final]
-
-        return latent_mu, latent_var, yh, predict, reconstructed, [qmu5_1, qvar5_1], [qmu4_1, qvar4_1]
-        ###################################
+        return latent, latent_mu, latent_var, \
+               predict, predict_test, yh, \
+               reconstructed, [enc2, enc4, out[0][0], out[1][0], out[2][0]]
     
     def forward_latency(self, size, alpha=True, beta=True, ratio=True):
         # out_prev: cell-state
@@ -762,198 +643,249 @@ class Network_Multi_Path(nn.Module):
         return class_latent
 
 
-    def forward(self, input, target, target_de, pretrain=False):
+    def forward(self, input, target, target_de, pretrain=False, test=False):
         # print(target)
         re_loss = 0
         ce_loss = 0
         kl_loss = 0
-        beta = 0.5
-        lamda = 100
-        theta = 1
+        contras_loss = 0
+        beta = next(self.beta)
+        img_index = 1
         if pretrain is not True:
             # "random width": sampled by gambel softmax
             self.prun_mode = None
             for idx in range(len(self._arch_names)):
                 self.arch_idx = idx
-                latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
+                # latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
+                latent, latent_mu, latent_var, \
+                predict, predict_test, yh, \
+                reconstructed, out = self._forward(input, target_de)
+                rec = reconstruction_function(reconstructed, input)
+                re_loss += rec
+                # print(rec)
+                z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+                z_latent_var, y_latent_var = torch.split(latent_var, [self.z_dim, self.latent_dim32], dim=1)
+                pm_z, pv_z = torch.zeros(z_latent_mu.shape).cuda(), torch.ones(z_latent_var.shape).cuda()
+                pm, pv = torch.zeros(y_latent_mu.shape).cuda(), torch.ones(y_latent_var.shape).cuda()
+                kl_latent = kl_normal(y_latent_mu, y_latent_var, pm, pv, yh)
+                kl_z = kl_normal(z_latent_mu, z_latent_var, pm_z, pv_z, 0)
+                kl_loss += beta * (kl_latent + self.beta_z * kl_z)
 
-                re_loss = re_loss + reconstruction_function(input, reconstructed)
-                ce_loss = ce_loss + nllloss(predict[0], target)
-                if up32[0] != None:
-                    # for i in range(3):
-                    #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                    # ce_loss = ce_loss + nllloss(predict[0], target)
-                    for i in range(3):
-                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        # ce_loss = ce_loss + nllloss(predict[i], target)
-                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-                    # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
-                    # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
-                    kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
-                    kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
-                    kl_loss = kl_loss + kl16
-                    kl_loss = kl_loss + kl8
-                else:
-                    for i in range(3):
-                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        # ce_loss = ce_loss + nllloss(predict[i], target)
-                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+                ce = nllloss(predict, target)
+                ce_loss += self.lamda * ce
+
+                contras = self.contrastive_loss(input, latent_mu, out, target, reconstructed)
+                contras_loss += contras
         if len(self._width_mult_list) > 1:
             self.prun_mode = "max"
-            latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
+            # latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
+            latent, latent_mu, latent_var, \
+            predict, predict_test, yh, \
+            reconstructed, out = self._forward(input, target_de)
+            rec = reconstruction_function(reconstructed, input)
+            re_loss += rec
 
-            re = torch.Tensor.cpu(reconstructed).detach().numpy()
-            # ori = torch.Tensor.cpu(input).detach().numpy()
-            temp = re[0]
-            temp = temp * 0.5 + 0.5
-            temp = temp * 255
-            temp = temp.transpose(1, 2, 0)
-            temp = temp.astype(np.uint8)
-            img = Image.fromarray(temp)
-            img.save(os.path.join("train_img", "check.jpeg"))
+            z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+            z_latent_var, y_latent_var = torch.split(latent_var, [self.z_dim, self.latent_dim32], dim=1)
+            pm_z, pv_z = torch.zeros(z_latent_mu.shape).cuda(), torch.ones(z_latent_var.shape).cuda()
+            pm, pv = torch.zeros(y_latent_mu.shape).cuda(), torch.ones(y_latent_var.shape).cuda()
+            kl_latent = kl_normal(y_latent_mu, y_latent_var, pm, pv, yh)
+            kl_z = kl_normal(z_latent_mu, z_latent_var, pm_z, pv_z, 0)
+            kl_loss += beta * (kl_latent + self.beta_z * kl_z)
 
-            latent_distance = 0
-            # latent_space_values = self.latent_space()
-            # latent_space_values = torch.FloatTensor(latent_space_values).cuda()
-            # # print(latent_space_values.shape)
-            # latent_distance = 9999999
-            # for i in range(9):
-            #     for j in range(i+1,10):
-            #         temp_dist = torch.sum((latent_space_values[i] - latent_space_values[j]).pow(2),dim=-1).sqrt()
-            #         if latent_distance > temp_dist:
-            #             latent_distance = temp_dist
-            # # latent_distance = latent_distance / 45
-            # # print(latent_distance)
+            ce = nllloss(predict, target)
+            ce_loss += self.lamda * ce
 
-            re_loss = re_loss + reconstruction_function(input, reconstructed)
-            ce_loss = ce_loss + nllloss(predict[0], target)
-            if up32[0] != None:
-                # for i in range(3):
-                #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                # ce_loss = ce_loss + nllloss(predict[0], target)
-                for i in range(3):
-                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    # ce_loss = ce_loss + nllloss(predict[i], target)
-                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-                # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
-                # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
-                kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
-                kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
-                kl_loss = kl_loss + kl16
-                kl_loss = kl_loss + kl8
-            else:
-                for i in range(3):
-                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    # ce_loss = ce_loss + nllloss(predict[i], target)
-                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+            contras = self.contrastive_loss(input, latent_mu, out, target, reconstructed)
+            contras_loss += contras
 
-            self.prun_mode = "min"
-            latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
-            re_loss = re_loss + reconstruction_function(input, reconstructed)
-            ce_loss = ce_loss + nllloss(predict[0], target)
-            if up32[0] != None:
-                # for i in range(3):
-                #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                # ce_loss = ce_loss + nllloss(predict[0], target)
-                for i in range(3):
-                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    # ce_loss = ce_loss + nllloss(predict[i], target)
-                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-                # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
-                # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
-                kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
-                kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
-                kl_loss = kl_loss + kl16
-                kl_loss = kl_loss + kl8
-            else:
-                for i in range(3):
-                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    # ce_loss = ce_loss + nllloss(predict[i], target)
-                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-            if pretrain == True:
-                self.prun_mode = "random"
-                latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
-                re_loss = re_loss + reconstruction_function(input, reconstructed)
-                ce_loss = ce_loss + nllloss(predict[0], target)
-                if up32[0] != None:
-                    # for i in range(3):
-                    #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                    # ce_loss = ce_loss + nllloss(predict[0], target)
-                    for i in range(3):
-                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        # ce_loss = ce_loss + nllloss(predict[i], target)
-                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-                    # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
-                    # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
-                    kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
-                    kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
-                    kl_loss = kl_loss + kl16
-                    kl_loss = kl_loss + kl8
-                else:
-                    for i in range(3):
-                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        # ce_loss = ce_loss + nllloss(predict[i], target)
-                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-                self.prun_mode = "random"
-                latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
-                re_loss = re_loss + reconstruction_function(input, reconstructed)
-                ce_loss = ce_loss + nllloss(predict[0], target)
-                if up32[0] != None:
-                    # for i in range(3):
-                    #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                    # ce_loss = ce_loss + nllloss(predict[0], target)
-                    for i in range(3):
-                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        # ce_loss = ce_loss + nllloss(predict[i], target)
-                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-                    # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
-                    # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
-                    kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
-                    kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
-                    kl_loss = kl_loss + kl16
-                    kl_loss = kl_loss + kl8
-                else:
-                    for i in range(3):
-                        pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                        # ce_loss = ce_loss + nllloss(predict[i], target)
-                        kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
+            # if pretrain == True:
+            #     self.prun_mode = "random"
+
         elif pretrain == True and len(self._width_mult_list) == 1:
             self.prun_mode = "max"
-            latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
-            re_loss = re_loss + reconstruction_function(input, reconstructed)
-            ce_loss = ce_loss + nllloss(predict[0], target)
-            if up32[0] != None:
-                # for i in range(3):
-                #     ce_loss = ce_loss + 0.2 * nllloss(predict[i], target)
-                # ce_loss = ce_loss + nllloss(predict[0], target)
-                for i in range(3):
-                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    # ce_loss = ce_loss + nllloss(predict[i], target)
-                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-                # pm, pv = torch.zeros(latent_mu[0].shape).cuda(), torch.ones(latent_var[0].shape).cuda()
-                # kl32 = kl_normal(latent_mu[0], latent_var[0], pm, pv, yh[0])
-                kl16 = kl_normal(up32[0], up32[1], latent_mu[1], latent_var[1], 0)
-                kl8 = kl_normal(up16[0], up16[1], latent_mu[2], latent_var[2], 0)
-                kl_loss = kl_loss + kl16
-                kl_loss = kl_loss + kl8
+            latent, latent_mu, latent_var, \
+            predict, predict_test, yh, \
+            reconstructed, out = self._forward(input, target_de)
+            rec = reconstruction_function(reconstructed, input)
+            re_loss += rec
 
-            else:
-                for i in range(3):
-                    pm, pv = torch.zeros(latent_mu[i].shape).cuda(), torch.ones(latent_var[i].shape).cuda()
-                    # ce_loss = ce_loss + nllloss(predict[i], target)
-                    kl_loss = kl_loss + kl_normal(latent_mu[i], latent_var[i], pm, pv, yh[i])
-        # print("The reconstruction loss is: {}".format(theta * re_loss))
-        # print("The cross entropy loss is: {}".format(lamda * ce_loss))
-        # print("The kl divergence loss is: {}".format(beta * kl_loss))
-        # loss = torch.mean(theta * re_loss + lamda * ce_loss + beta * kl_loss)
-        # loss = ce_loss
-        self.prun_mode = "random"
-        _, _, _, predict, _, _, _ = self._forward(input, target, target_de)
+            z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+            z_latent_var, y_latent_var = torch.split(latent_var, [self.z_dim, self.latent_dim32], dim=1)
+            pm_z, pv_z = torch.zeros(z_latent_mu.shape).cuda(), torch.ones(z_latent_var.shape).cuda()
+            pm, pv = torch.zeros(y_latent_mu.shape).cuda(), torch.ones(y_latent_var.shape).cuda()
+            kl_latent = kl_normal(y_latent_mu, y_latent_var, pm, pv, yh)
+            kl_z = kl_normal(z_latent_mu, z_latent_var, pm_z, pv_z, 0)
+            kl_loss += beta * (kl_latent + self.beta_z * kl_z)
+
+            ce = nllloss(predict, target)
+            ce_loss += self.lamda * ce
+
+            contras = self.contrastive_loss(input, latent_mu, out, target, reconstructed)
+            contras_loss += contras
+        self.prun_mode = "max"
+        # _, _, _, predict, _, _, _ = self._forward(input, target, target_de)
+        _, latent_mu, _, \
+        predict, predict_test, _, \
+        reconstructed, _ = self._forward(input, target_de)
         # print("ce_loss: {}".format(ce_loss.shape))
         # print("re_loss: {}".format(re_loss.shape))
         # print("kl_loss: {}".format(kl_loss.shape))
 
-        return ce_loss, re_loss, torch.mean(kl_loss), predict
+        # return ce_loss, re_loss, torch.mean(kl_loss), predict
+        z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+        return ce_loss, torch.mean(kl_loss), re_loss, contras_loss, predict, predict_test, y_latent_mu, reconstructed
+
+    def test(self, input, target, target_de, pretrain=False):
+        self.prun_mode = "max"
+        # _, _, _, predict, _, _, _ = self._forward(input, target, target_de)
+        _, latent_mu, _, \
+        predict, predict_test, _, \
+        reconstructed, _ = self._forward(input, target_de)
+        # print("ce_loss: {}".format(ce_loss.shape))
+        # print("re_loss: {}".format(re_loss.shape))
+        # print("kl_loss: {}".format(kl_loss.shape))
+
+        # return ce_loss, re_loss, torch.mean(kl_loss), predict
+        z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+        return predict_test, y_latent_mu, reconstructed
+
+    def get_yh(self, y_de):
+        yh = self.one_hot32(y_de)
+        return yh
+
+    def contrastive_loss(self, x, latent_mu, out, target, rec_x):
+        """
+        z : batchsize * 10
+        """
+        bs = x.size(0)
+        ### get current yh for each class
+        target_en = torch.eye(self._num_classes)
+        class_yh = self.get_yh(target_en.cuda())  # 6*32
+        yh_size = class_yh.size(1)
+
+        neg_class_num = self._num_classes - 1
+        # z_neg = z.unsqueeze(1).repeat(1, neg_class_num, 1)
+        y_neg = torch.zeros((bs, neg_class_num, yh_size)).cuda()
+        for i in range(bs):
+            y_sample = [idx for idx in range(self._num_classes) if idx != torch.argmax(target[i])]
+            y_neg[i] = class_yh[y_sample]
+        # zy_neg = torch.cat([z_neg, y_neg], dim=2).view(bs*neg_class_num, z.size(1)+yh_size)
+
+        rec_x_neg = self.generate_cf(x, latent_mu, out, target, y_neg)
+        # print(rec_x.shape)
+        # print(rec_x_neg.shape)
+        rec_x_all = torch.cat([rec_x.unsqueeze(1), rec_x_neg], dim=1)
+
+        x_expand = x.unsqueeze(1).repeat(1, self._num_classes, 1, 1, 1)
+        neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4)) * self.temperature  # N*(K+1)
+        label = torch.zeros(bs).cuda().long()
+        contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, label)
+
+        return contrastive_loss_euclidean
+
+    def generate_cf(self, x, latent_mu, out, y_de, mean_y):
+        """
+        :param x:
+        :param mean_y: list, the class-wise feature y
+        """
+        if mean_y.dim() == 2:
+            class_num = mean_y.size(0)
+        elif mean_y.dim() == 3:
+            class_num = mean_y.size(1)
+        bs = latent_mu.size(0)
+
+        z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+
+        z_latent_mu = z_latent_mu.unsqueeze(1).repeat(1, class_num, 1)
+        if mean_y.dim() == 2:
+            y_mu =mean_y.unsqueeze(0).repeat(bs, 1, 1)
+        elif mean_y.dim() == 3:
+            y_mu = mean_y
+        latent_zy = torch.cat([z_latent_mu, y_mu], dim=2).view(bs*class_num, latent_mu.size(1))
+
+        # latent = ut.sample_gaussian(mu_latent, var_latent)
+
+        # partially downwards
+        decoded = self.dec32(latent_zy)
+        decoded = decoded.view(-1, 1024, 2, 2)
+        # print(decoded.shape)
+        out32 = torch.cat((decoded, out[4].repeat(class_num, 1,1,1)), dim=1)
+        out16 = torch.cat((self.up32.decode(out32), out[3].repeat(class_num, 1,1,1)), dim=1)
+        out8 = torch.cat((self.up16.decode(out16), out[2].repeat(class_num, 1,1,1)), dim=1)
+        out4 = torch.cat((self.up8.decode(out8), out[1].repeat(class_num, 1,1,1)), dim=1)
+        out2 = torch.cat((self.up4.decode(out4), out[0].repeat(class_num, 1,1,1)), dim=1)
+        out1 = self.up2.decode(out2)
+        x_re = self.refine1.final_decode(out1)
+
+        return x_re.view(bs, class_num, *x.size()[1:])
+
+    def rec_loss_cf(self, feature_y_mean, val_loader, test_loader, args):
+        rec_loss_cf_all = []
+        class_num = feature_y_mean.size(0)
+        for data_test, target_test in val_loader:
+            target_test_en = torch.Tensor(target_test.shape[0], args.num_classes)
+            target_test_en.zero_()
+            target_test_en.scatter_(1, target_test.view(-1, 1), 1)  # one-hot encoding
+            target_test_en = target_test_en.cuda()
+            if args.cuda:
+                data_test, target_test = data_test.cuda(), target_test.cuda()
+            with torch.no_grad():
+                data_test, target_test = Variable(data_test), Variable(target_test)
+
+
+            _, latent_mu, _, _, _, _, _, outputs = self._forward(data_test, target_test_en)
+
+            re_test = self.generate_cf(data_test, latent_mu, outputs, target_test_en, feature_y_mean)
+            data_test_cf = data_test.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
+            rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
+            rec_loss_cf = rec_loss.min(1)[0]
+            rec_loss_cf_all.append(rec_loss_cf)
+
+        for data_test, target_test in test_loader:
+            target_test_en = torch.Tensor(target_test.shape[0], args.num_classes)
+            target_test_en.zero_()
+            # target_test_en.scatter_(1, target_test.view(-1, 1), 1)  # one-hot encoding
+            target_test_en = target_test_en.cuda()
+            if args.cuda:
+                data_test, target_test = data_test.cuda(), target_test.cuda()
+            with torch.no_grad():
+                data_test, target_test = Variable(data_test), Variable(target_test)
+
+            _, latent_mu, _, _, _, _, _, outputs = self._forward(data_test, target_test_en)
+
+            re_test = self.generate_cf(data_test, latent_mu, outputs, target_test_en, feature_y_mean)
+            data_test_cf = data_test.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
+            rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
+            rec_loss_cf = rec_loss.min(1)[0]
+            rec_loss_cf_all.append(rec_loss_cf)
+
+        rec_loss_cf_all = torch.cat(rec_loss_cf_all, 0)
+        return rec_loss_cf_all
+
+    def rec_loss_cf_train(self, feature_y_mean, train_loader, args):
+        rec_loss_cf_all = []
+        class_num = feature_y_mean.size(0)
+        for data_train, target_train in train_loader:
+            target_train_en = torch.Tensor(target_train.shape[0], args.num_classes)
+            target_train_en.zero_()
+            target_train_en.scatter_(1, target_train.view(-1, 1), 1)  # one-hot encoding
+            target_train_en = target_train_en.cuda()
+            if args.cuda:
+                data_train, target_train = data_train.cuda(), target_train.cuda()
+            with torch.no_grad():
+                data_train, target_train = Variable(data_train), Variable(target_train)
+
+            _, latent_mu, _, _, _, _, _, outputs = self._forward(data_train, target_train_en)
+
+            re_train = self.generate_cf(data_train, latent_mu, outputs, target_train_en, feature_y_mean)
+            data_train_cf = data_train.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
+            rec_loss = (re_train - data_train_cf).pow(2).sum((2, 3, 4))
+            rec_loss_cf = rec_loss.min(1)[0]
+            rec_loss_cf_all.append(rec_loss_cf)
+
+        rec_loss_cf_all = torch.cat(rec_loss_cf_all, 0)
+        return rec_loss_cf_all
 
     def _build_arch_parameters(self, idx):
         num_ops = len(PRIMITIVES)

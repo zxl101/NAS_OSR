@@ -29,8 +29,8 @@ class Architect(object):
         print("architect initialized!")
 
     def _compute_unrolled_model(self, input, target, target_de, eta, network_optimizer):
-        ce_loss, re_loss, kl_loss, _ = self.model(input, target, target_de)
-        loss = ce_loss + re_loss + kl_loss
+        ce_loss, kl_loss, re_loss, contras_loss, _, _, _, _ = self.model(input, target, target_de)
+        loss = ce_loss + kl_loss + re_loss + contras_loss
         theta = _concat(self.model.module.parameters()).data
         try:
             moment = _concat(network_optimizer.state[v]['momentum_buffer'] for v in self.model.module.parameters()).mul_(self.network_momentum)
@@ -46,11 +46,9 @@ class Architect(object):
         if unrolled:
                 loss = self._backward_step_unrolled(input_train, target_train, target_train_de, input_valid, target_valid, target_valid_de, eta, network_optimizer)
         else:
-                ce_loss, re_loss, kl_loss = self._backward_step(input_valid, target_valid, target_valid_de)
-                # print(ce_loss.shape)
-                # print(re_loss.shape)
-                # print(kl_loss.shape)
-                loss = ce_loss + re_loss + kl_loss
+
+                ce_loss, kl_loss, re_loss, contras_loss = self._backward_step(input_valid, target_valid, target_valid_de)
+                loss = ce_loss + kl_loss + re_loss + contras_loss
         loss = torch.mean(loss)
         loss.backward()
         # if loss_latency != 0: loss_latency.backward()
@@ -59,7 +57,7 @@ class Architect(object):
         return loss
 
     def _backward_step(self, input_valid, target_valid, target_de):
-        ce_loss, re_loss, kl_loss, _ = self.model(input_valid, target_valid, target_de)
+        ce_loss, kl_loss, re_loss, contras_loss, _, _, _, _ = self.model(input_valid, target_valid, target_de, test=True)
         loss_latency = 0
         self.latency_supernet = 0
         self.model.module.prun_mode = None
@@ -79,14 +77,15 @@ class Architect(object):
         #         self.latency_supernet = latency
         #         loss_latency = loss_latency + latency * self.latency_weight[idx]
 
-        return ce_loss, re_loss, kl_loss
-
+        # return ce_loss, re_loss, kl_loss
+        return ce_loss, kl_loss, re_loss, contras_loss
     def _backward_step_unrolled(self, input_train, target_train, target_train_de, input_valid, target_valid, target_valid_de, eta, network_optimizer):
         unrolled_model = self._compute_unrolled_model(input_train, target_train, target_train_de, eta, network_optimizer)
-        # unrolled_loss = unrolled_model._loss(input_valid, target_valid, target_valid_de)
+
         unrolled_model = nn.DataParallel(unrolled_model)
-        ce_loss, kl_loss, re_loss, _ = unrolled_model(input_valid, target_valid, target_valid_de)
-        unrolled_loss = ce_loss + kl_loss + re_loss
+
+        ce_loss, kl_loss, re_loss, contras_loss, _, _, _, _ = self.model(input_train, target_train, target_train_de)
+        unrolled_loss = ce_loss + kl_loss + re_loss + contras_loss
 
         unrolled_loss.backward()
         dalpha = [v.grad for v in unrolled_model.module.arch_parameters()]
@@ -122,14 +121,14 @@ class Architect(object):
         R = r / _concat(vector).norm()
         for p, v in zip(self.model.parameters(), vector):
             p.data.add_(R, v)
-        ce_loss, re_loss, kl_loss, _ = self.model(input, target, target_de)
-        loss = ce_loss + re_loss + kl_loss
+        ce_loss, kl_loss, re_loss, contras_loss, _, _, _, _ = self.model(input, target, target_de)
+        loss = ce_loss + kl_loss + re_loss + contras_loss
         grads_p = torch.autograd.grad(loss[:-1], self.model.arch_parameters())
 
         for p, v in zip(self.model.parameters(), vector):
             p.data.sub_(2*R, v)
-        ce_loss, re_loss, kl_loss, _ = self.model(input, target, target_de)
-        loss = ce_loss + re_loss + kl_loss
+        ce_loss, kl_loss, re_loss, contras_loss, _, _, _, _ = self.model(input, target, target_de)
+        loss = ce_loss + kl_loss + re_loss + contras_loss
         grads_n = torch.autograd.grad(loss[:-1], self.model.arch_parameters())
 
         for p, v in zip(self.model.parameters(), vector):
