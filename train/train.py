@@ -67,7 +67,7 @@ def sample_gaussian(m, v):
 # from torchviz import make_dot
 # from torchsummary import summary
 
-reconstruction_function = nn.MSELoss()
+reconstruction_function = nn.L1Loss()
 reconstruction_function.reduction = 'mean'
 nllloss = nn.NLLLoss(reduction='mean')
 
@@ -202,7 +202,7 @@ def main():
         config.weight_decay = args.weight_decay
     if args.batch_size != None:
         config.batch_size = args.batch_size
-        config.niters_per_epoch = min(config.num_train_imgs // 2 // config.batch_size, 1000)
+        # config.niters_per_epoch = min(config.num_train_imgs // 2 // config.batch_size, 1000)
     if args.num_classes != None:
         config.num_classes = args.num_classes
     if args.nepochs != None:
@@ -282,6 +282,7 @@ def main():
     # train_dataset, val_dataset, pick_dataset, test_dataset = load_dataset.sampler_search(seed_sampler, args)
     train_dataset, val_dataset, test_dataset = load_dataset.sampler_train(seed_sampler, config)
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=0)
+    config.niters_per_epoch = min(len(train_dataset) // config.batch_size, 1000)
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     # pick_loader = DataLoader(pick_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
@@ -357,7 +358,7 @@ def main():
 
     if config.is_eval:
         config.save = config.eval_path
-        f1_score, threshold = test(model, train_loader, val_loader, test_loader, 0, logger, True)
+        f1_score = test(model, train_loader, val_loader, test_loader, 0, logger, True)
 
     elif config.is_train:
         best_val_loss = 9999999
@@ -385,10 +386,10 @@ def main():
                 with torch.no_grad():
                     # ce_loss, re_loss, kl_loss, contras_loss = infer(model, val_loader, epoch=epoch, logger=logger)
                     # total_val_loss = ce_loss + kl_loss + re_loss + contras_loss
-                    f1_score, threshold = test(model, train_loader, val_loader, test_loader, epoch, logger, True)
-                    print("F1 score of current epoch is {} at {} threshold".format(f1_score,threshold))
+                    f1_score = test(model, train_loader, val_loader, test_loader, epoch, logger, True)
+                    print("F1 score of current epoch is {}".format(f1_score))
                     logger.add_scalar('Acc_val/total_f1', f1_score, epoch)
-                    logger.add_scalar('Acc_val/threshold', threshold, epoch)
+                    # logger.add_scalar('Acc_val/threshold', threshold, epoch)
                     # if total_val_loss < best_val_loss and config.test:
                     if f1_score < best_f1 and config.test:
                         # best_val_loss = total_val_loss
@@ -439,6 +440,8 @@ def train(train_loader, model, optimizer, logger, epoch):
     open('%s/train_tar.txt' % config.save, 'w').close()
     open('%s/train_pre.txt' % config.save, 'w').close()
     open('%s/train_rec.txt' % config.save, 'w').close()
+    open('cf_img/train_yh.txt', 'w').close()
+    open('cf_img/train_cf_re_diff.txt','w').close()
 
     img_index = 1
     for step in pbar:
@@ -450,6 +453,7 @@ def train(train_loader, model, optimizer, logger, epoch):
         target_en = torch.Tensor(target.shape[0], config.num_classes)
         target_en.zero_()
         target_en.scatter_(1, target.view(-1, 1), 1)  # one-hot encoding
+        # print(target_en)
         target_en = target_en.cuda(non_blocking=True)
         imgs = imgs.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
@@ -476,7 +480,7 @@ def train(train_loader, model, optimizer, logger, epoch):
         kl_loss = config.beta * (kl_latent + config.beta_z * kl_z)
         epoch_kl_loss += kl_loss
 
-        contras = model.module.contrastive_loss(imgs, latent_mu, latent_var, outputs, target, reconstructed, img_index)
+        contras = model.module.contrastive_loss(imgs, latent_mu, latent_var, outputs, target_en, reconstructed, img_index)
         contras_loss = config.wcontras * contras
         epoch_contras_loss += contras_loss
 
@@ -497,13 +501,21 @@ def train(train_loader, model, optimizer, logger, epoch):
         else:
             outlabel = predict.data.max(1)[1]  # get the index of the max log-probability
 
-        ori = torch.Tensor.cpu(imgs[0]).detach().numpy()
-        ori = ori.transpose(1, 2, 0)
-        ori = ori * 0.5 + 0.5
-        ori = ori * 255
-        ori = ori.astype(np.uint8)
-        ori = Image.fromarray(ori)
-        ori.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, "img")))
+        if img_index < 10:
+            ori = torch.Tensor.cpu(imgs[0]).detach().numpy()
+            ori = ori.transpose(1, 2, 0)
+            ori = ori * 0.5 + 0.5
+            ori = ori * 255
+            ori = ori.astype(np.uint8)
+            ori = Image.fromarray(ori)
+            ori.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, "img")))
+            re = torch.Tensor.cpu(reconstructed[0]).detach().numpy()
+            re = re.transpose(1, 2, 0)
+            re = re * 0.5 + 0.5
+            re = re * 255
+            re = re.astype(np.uint8)
+            img = Image.fromarray(re)
+            img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, "0")))
         img_index += 1
         correct_train += outlabel.eq(target.view_as(outlabel)).sum().item()
 
@@ -585,7 +597,7 @@ def test(model, train_loader, val_loader, test_loader, epoch=0, logger=None, val
             kl_loss = config.beta * (kl_latent + config.beta_z * kl_z)
             total_kl_loss += kl_loss
 
-            contras = model.module.contrastive_loss(data_val, mu_val, latent_var, outputs, target_val, de_val)
+            contras = model.module.contrastive_loss(data_val, mu_val, latent_var, outputs, target_val_en, de_val)
             contras_loss = config.wcontras * contras
             total_contras_loss += contras_loss
 
@@ -683,14 +695,14 @@ def test(model, train_loader, val_loader, test_loader, epoch=0, logger=None, val
             np.savetxt(l_test, rec_omn, fmt='%f', delimiter=' ', newline='\r')
             l_test.write(b'\n')
 
-    perf, threshold = ocr_test(config, model, train_loader, val_loader, test_loader)
+    perf = ocr_test(config, model, train_loader, val_loader, test_loader)
     if val:
         f1_matrix = np.loadtxt(config.save + '/performance.txt')
         precision = f1_matrix[-1][3]
         recall = f1_matrix[-1][4]
         f1 = (precision * recall) / (precision + recall)
         logger.add_scalar('Acc_val/open_f1_score', f1, epoch)
-    return perf[-1], threshold
+    return perf[-1]
 
 
 

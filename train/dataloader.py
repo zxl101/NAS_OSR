@@ -385,9 +385,10 @@ class SVHN_Dataset(Dataset):
         if seed is not None:
             random.seed(seed)
         seen_classes = random.sample(range(0, 10), 4)
-
         unseen_classes = [idx for idx in range(10) if idx not in seen_classes]
-
+        val_classes = random.sample(unseen_classes, 2)
+        unseen_classes = [idx for idx in unseen_classes if idx not in val_classes]
+        seen_classes = seen_classes + val_classes
         osr_trainset, osr_valset, osr_testset = construct_ocr_dataset_aug(self.trainset, self.testset,
                                                                       seen_classes, None, unseen_classes,
                                                                       self.transform_train, self.transform_test, args)

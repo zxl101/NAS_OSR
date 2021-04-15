@@ -563,58 +563,114 @@ class Network_Multi_Path_Infer(nn.Module):
         ### get current yh for each class
         target_en = torch.eye(self._num_classes)
         class_yh = self.get_yh(target_en.cuda())  # 6*32
-        # print(class_yh[0])
         yh_size = class_yh.size(1)
 
-        # neg_class_num = self._num_classes - 1
+        neg_class_num = self._num_classes - 1
         # z_neg = z.unsqueeze(1).repeat(1, neg_class_num, 1)
-        y_all = torch.zeros((bs, self._num_classes, yh_size)).cuda()
-        # y_neg = torch.zeros((bs, neg_class_num, yh_size)).cuda()
+        y_neg = torch.zeros((bs, neg_class_num, yh_size)).cuda()
+        # yh = []
+
         for i in range(bs):
             y_sample = [idx for idx in range(self._num_classes) if idx != torch.argmax(target[i])]
-            # y_sample = [idx for idx in range(self._num_classes) if idx != target[i]]
-            y_all[i] = class_yh
-            # y_neg[i] = class_yh[y_sample]
-        # print(y_neg)
-        y_all = class_yh.unsqueeze(0).repeat(bs, 1, 1)
+            y_neg[i] = class_yh[y_sample]
 
         # zy_neg = torch.cat([z_neg, y_neg], dim=2).view(bs*neg_class_num, z.size(1)+yh_size)
-        # rec_x_neg = self.generate_cf(x, latent_mu, latent_var, out, target, y_neg)
-        rec_x_all = self.generate_cf(x, latent_mu, latent_var, out, target, y_all)
 
-        # rec_x_all = torch.cat([rec_x.unsqueeze(1), rec_x_neg], dim=1)
-        # diff = torch.sum(rec_x_all[0][0] - rec_x_all[0][2])
-        # print(diff)
-        if img_index != None:
-            for i in range(rec_x_all.shape[1]):
-                temp = rec_x_all[0][i]
-                temp = torch.Tensor.cpu(temp).detach().numpy()
-                temp = temp.transpose(1, 2, 0)
-                # temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
-                temp = temp * 0.5 + 0.5
-                # temp = temp * 0.3081 + 0.1307
-                # temp = np.reshape(temp, (32, 32))
-                temp = temp * 255
-                temp = temp.astype(np.uint8)
-                img = Image.fromarray(temp)
-                img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, i)))
+        rec_x_neg = self.generate_cf(x, latent_mu, latent_var, out, target, y_neg)
+        neg_idx = [idx for idx in range(self._num_classes) if idx != torch.argmax(target[0])]
+
+        rec_x_all = torch.cat([rec_x.unsqueeze(1), rec_x_neg], dim=1)
+
+
         x_expand = x.unsqueeze(1).repeat(1, self._num_classes, 1, 1, 1)
         neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4)) * self.temperature  # N*(K+1)
-        re = torch.Tensor.cpu(rec_x[0]).detach().numpy()
-        re = re.transpose(1, 2, 0)
-        # temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
-        re = re * 0.5 + 0.5
-        # temp = temp * 0.3081 + 0.1307
-        # temp = np.reshape(temp, (32, 32))
-        re = re * 255
-        re = re.astype(np.uint8)
-        img = Image.fromarray(re)
-        img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, "re")))
-        # print(neg_dist)
-        # print(target)
-        contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, target)
+        neg_dist[:, 0] = neg_dist[:, 0] - 0.5
+
+        if img_index != None:
+            if img_index < 10:
+                for i in range(rec_x_neg.shape[1]):
+                    neg = torch.Tensor.cpu(y_neg[0]).detach().numpy()
+                    c_yh = torch.Tensor.cpu(class_yh).detach().numpy()
+                    dist = torch.Tensor.cpu(neg_dist).detach().numpy()
+                    with open('cf_img/train_yh.txt', 'ab') as f:
+                        np.savetxt(f, c_yh[:, 0], fmt='%f', delimiter=' ', newline='\r')
+                        f.write(b'\n')
+                        np.savetxt(f, neg[:, 0], fmt='%f', delimiter=' ', newline='\r')
+                        f.write(b'\n')
+                    with open('cf_img/train_cf_re_diff.txt', 'ab') as f:
+                        # np.savetxt(f, c_yh, fmt='%f', delimiter=' ', newline='\r')
+                        np.savetxt(f, dist, fmt='%f', delimiter=' ', newline='\r')
+                        f.write(b'\n')
+
+                    temp = rec_x_neg[0][i]
+                    temp = torch.Tensor.cpu(temp).detach().numpy()
+                    temp = temp.transpose(1, 2, 0)
+                    temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+                    # temp = temp * 0.3081 + 0.1307
+                    # temp = np.reshape(temp, (32, 32))
+                    temp = temp * 255
+                    temp = temp.astype(np.uint8)
+                    img = Image.fromarray(temp)
+                    # img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, neg_idx[i])))
+                    img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, range(1, self._num_classes)[i])))
+
+        label = torch.zeros(bs).cuda().long()
+        contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, label)
 
         return contrastive_loss_euclidean
+
+
+    # def contrastive_loss(self, x, latent_mu, latent_var, out, target, rec_x, img_index=None):
+    #     """
+    #     z : batchsize * 10
+    #     """
+    #     bs = x.size(0)
+    #     ### get current yh for each class
+    #     target_en = torch.eye(self._num_classes)
+    #     class_yh = self.get_yh(target_en.cuda())  # 6*32
+    #     # print(class_yh[0])
+    #     yh_size = class_yh.size(1)
+    #
+    #     y_all = torch.zeros((bs, self._num_classes, yh_size)).cuda()
+    #
+    #     for i in range(bs):
+    #         y_all[i] = class_yh
+    #
+    #
+    #     y_all = class_yh.unsqueeze(0).repeat(bs, 1, 1)
+    #     rec_x_all = self.generate_cf(x, latent_mu, latent_var, out, target, y_all)
+    #
+    #     # diff = torch.sum(rec_x_all[0][0] - rec_x_all[0][2])
+    #     # print(diff)
+    #     if img_index != None:
+    #         if img_index < 10:
+    #             # print(img_index)
+    #             for i in range(rec_x_all.shape[1]):
+    #                 temp = rec_x_all[0][i]
+    #                 temp = torch.Tensor.cpu(temp).detach().numpy()
+    #                 temp = temp.transpose(1, 2, 0)
+    #                 # temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+    #                 temp = temp * 0.5 + 0.5
+    #                 # temp = temp * 0.3081 + 0.1307
+    #                 # temp = np.reshape(temp, (32, 32))
+    #                 temp = temp * 255
+    #                 temp = temp.astype(np.uint8)
+    #                 img = Image.fromarray(temp)
+    #                 img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, i)))
+    #     x_expand = x.unsqueeze(1).repeat(1, self._num_classes, 1, 1, 1)
+    #     neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4)) * self.temperature  # N*(K+1)
+    #             # re = torch.Tensor.cpu(rec_x[0]).detach().numpy()
+    #             # re = re.transpose(1, 2, 0)
+    #             # re = re * 0.5 + 0.5
+    #             # re = re * 255
+    #             # re = re.astype(np.uint8)
+    #             # img = Image.fromarray(re)
+    #             # img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, "re")))
+    #     # print(neg_dist)
+    #     # print(target)
+    #     contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, target)
+    #
+    #     return contrastive_loss_euclidean
 
 
     def cf_pred(self, x, latent_mu, latent_var, out, target, image_idx=None):
