@@ -500,6 +500,8 @@ class Network_Multi_Path_Infer(nn.Module):
         decoded = self.dec32(latent)
         decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
 
+        print(decoded.shape)
+        print(outputs32.shape)
         out32 = torch.cat((decoded, outputs32), dim=1)
         out16 = torch.cat((self.up32.decode(out32), outputs16), dim=1)
         out8 = torch.cat((self.up16.decode(out16), outputs8), dim=1)
@@ -545,7 +547,7 @@ class Network_Multi_Path_Infer(nn.Module):
                         outputs16 = output
                     elif scale == 16:
                         outputs32 = output
-        # print(outputs8.shape)
+
         latent, latent_mu, latent_var, \
         predict, predict_test, yh, \
         reconstructed, outputs = self.agg_ffm([enc2, enc4, outputs8,outputs16,outputs32],label_en)

@@ -141,6 +141,9 @@ def main(pretrain=True):
         in_channel = 3
     config.num_classes = args.num_classes
     config.in_channel = in_channel
+    config.img_size = 32
+    if args.dataset == "TinyImageNet":
+        config.img_size = 64
 
     # pretrain
     config.save = "pretrain-%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d"%(config.image_height, config.image_width,

@@ -10,11 +10,11 @@ import cv2
 from PIL import Image
 
 # Transformations
-RC   = transforms.RandomCrop(32, padding=4)
-RHF  = transforms.RandomHorizontalFlip()
-RVF  = transforms.RandomVerticalFlip()
-NRM  = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-TT   = transforms.ToTensor()
+RC = transforms.RandomCrop(32, padding=4)
+RHF = transforms.RandomHorizontalFlip()
+RVF = transforms.RandomVerticalFlip()
+NRM = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+TT = transforms.ToTensor()
 TPIL = transforms.ToPILImage()
 
 
@@ -30,8 +30,6 @@ class MNIST_Dataset(Dataset):
             transforms.RandomHorizontalFlip(0.5),
             transforms.RandomRotation(10),
             transforms.ToTensor(),
-            # transforms.Normalize((0.4914, 0.4822, 0.4465),
-            #                      (0.2023, 0.1994, 0.2010)),
             transforms.Normalize((0.1307,), (0.3081,)),
         ])
 
@@ -148,7 +146,6 @@ class CIFAR100_Dataset(Dataset):
         # seen_classes = range(0, 10)
         unseen_classes = [idx for idx in range(100) if idx not in seen_classes]
         unseen_classes_num = args.unseen_num
-        # unseen_classes_num =
         unseen_classes = random.sample(unseen_classes, unseen_classes_num)
         val_classes = random.sample(unseen_classes, 5)
         unseen_classes = [idx for idx in unseen_classes if idx not in val_classes]
@@ -382,7 +379,8 @@ class SVHN_Dataset(Dataset):
         unseen_classes = [idx for idx in range(10) if idx not in seen_classes]
         val_classes = random.sample(unseen_classes, 2)
         unseen_classes = [idx for idx in unseen_classes if idx not in val_classes]
-        seen_classes = seen_classes + val_classes
+        seen_classes = seen_classes + unseen_classes
+
         osr_trainset, osr_valset, osr_testset = construct_ocr_dataset_aug(self.trainset, self.testset,
                                                                       seen_classes, None, unseen_classes,
                                                                       self.transform_train, self.transform_test, args)
@@ -468,7 +466,7 @@ def construct_ocr_dataset(trainset, testset, seen_classes, unseen_classes, trans
 
 
 def construct_ocr_dataset_aug(trainset, testset, seen_classes, val_classes, unseen_classes, transform_train, transform_test, args):
-    if args.dataset in ['MNIST', 'CIFAR10', 'CIFAR100', 'TinyImageNet']:
+    if args.dataset in ['MNIST', 'CIFAR10', 'CIFAR100']:
         osr_trainset = DatasetBuilder(
             [get_class_i(trainset.data, trainset.targets, idx) for idx in seen_classes],
             transform_train)
@@ -502,6 +500,24 @@ def construct_ocr_dataset_aug(trainset, testset, seen_classes, val_classes, unse
 
         osr_testset = DatasetBuilder(
             [get_class_i(testset.data, testset.labels, idx) for idx in unseen_classes],
+            transform_test)
+    elif args.dataset in ['TinyImageNet']:
+        # print(trainset.)
+        osr_trainset = DatasetBuilder(
+            [get_class_i(trainset.imgs, trainset.targets, idx) for idx in seen_classes],
+            transform_train)
+
+        osr_valset = DatasetBuilder(
+            [get_class_i(testset.imgs, testset.targets, idx) for idx in seen_classes],
+            transform_test)
+
+        if val_classes != None:
+            osr_pickset = DatasetBuilder(
+                [get_class_i(testset.imgs, testset.targets, idx) for idx in val_classes],
+                transform_test)
+
+        osr_testset = DatasetBuilder(
+            [get_class_i(testset.imgs, testset.targets, idx) for idx in unseen_classes],
             transform_test)
 
     if val_classes != None:

@@ -67,8 +67,8 @@ if C.mode == "teacher":
     C.batch_size = 64
     # C.niters_per_epoch = min(1000, C.num_train_imgs // C.batch_size)  # how many batches per epoch
     C.Fch = 16 # base channel number
-    # C.image_height = 64 # crop size for training
-    # C.image_width = 64
+    C.image_height = 64
+    C.image_width = 64
     C.save = "%dx%d_teacher_batch%d"%(C.image_height, C.image_width, C.batch_size)
 # elif C.mode == "student":
 #     ##### train student with KL distillation from teacher ##############

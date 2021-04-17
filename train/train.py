@@ -29,16 +29,10 @@ from dataloader import MNIST_Dataset, CIFAR10_Dataset, SVHN_Dataset, CIFARAdd10_
 from utils.darts_utils import create_exp_dir, save, plot_op, plot_path_width, objective_acc_lat
 from utils.init_func import init_weight
 from model_seg import Network_Multi_Path_Infer as Network
-import seg_metrics
 
-from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from qmv import ocr_test
-import pickle
-import PIL
 from PIL import Image
-import cv2
-import matplotlib
 import argparse
 
 class DeterministicWarmup(object):
@@ -202,7 +196,7 @@ def main():
         config.weight_decay = args.weight_decay
     if args.batch_size != None:
         config.batch_size = args.batch_size
-        config.niters_per_epoch = min(config.num_train_imgs // 2 // config.batch_size, 1000)
+
     if args.num_classes != None:
         config.num_classes = args.num_classes
     if args.nepochs != None:
@@ -247,11 +241,14 @@ def main():
         in_channel = 3
     elif args.dataset == "TinyImageNet":
         load_dataset = TinyImageNet_Dataset()
-        args.num_classes = 70
+        args.num_classes = 100
         in_channel = 3
     config.num_classes = args.num_classes
     config.in_channel = in_channel
     config.img_size = 32
+    if args.dataset == "TinyImageNet":
+        config.img_size = 64
+
 
     create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
@@ -284,7 +281,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     # pick_loader = DataLoader(pick_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
-
+    config.niters_per_epoch = min(len(train_dataset) // config.batch_size, 1000)
 
     # Model #######################################
     models = []

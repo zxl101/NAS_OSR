@@ -390,7 +390,7 @@ class SVHN_Dataset(Dataset):
 class TinyImageNet_Dataset(Dataset):
     def __init__(self):
         self.trainset = ImageFolder(root='./data/tiny-imagenet-200/train')
-        self.testset = SVHN(root='./data/tiny-imagenet-200/test')
+        self.testset = ImageFolder(root='./data/tiny-imagenet-200/test')
         # self.classDict = {'0': 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8,
         #                   '9': 9}
         self.transform_train = transforms.Compose([
@@ -502,21 +502,22 @@ def construct_ocr_dataset_aug(trainset, testset, seen_classes, val_classes, unse
             [get_class_i(testset.data, testset.labels, idx) for idx in unseen_classes],
             transform_test)
     elif args.dataset in ['TinyImageNet']:
+        # print(trainset.)
         osr_trainset = DatasetBuilder(
-            [get_class_i(trainset.data, trainset.targets, idx) for idx in seen_classes],
+            [get_class_i(trainset.imgs, trainset.targets, idx) for idx in seen_classes],
             transform_train)
 
         osr_valset = DatasetBuilder(
-            [get_class_i(testset.data, testset.targets, idx) for idx in seen_classes],
+            [get_class_i(testset.imgs, testset.targets, idx) for idx in seen_classes],
             transform_test)
 
         if val_classes != None:
             osr_pickset = DatasetBuilder(
-                [get_class_i(testset.data, testset.targets, idx) for idx in val_classes],
+                [get_class_i(testset.imgs, testset.targets, idx) for idx in val_classes],
                 transform_test)
 
         osr_testset = DatasetBuilder(
-            [get_class_i(testset.data, testset.targets, idx) for idx in unseen_classes],
+            [get_class_i(testset.imgs, testset.targets, idx) for idx in unseen_classes],
             transform_test)
 
     if val_classes != None:
