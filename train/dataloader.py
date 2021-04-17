@@ -10,11 +10,11 @@ import cv2
 from PIL import Image
 
 # Transformations
-RC   = transforms.RandomCrop(32, padding=4)
-RHF  = transforms.RandomHorizontalFlip()
-RVF  = transforms.RandomVerticalFlip()
-NRM  = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-TT   = transforms.ToTensor()
+RC = transforms.RandomCrop(32, padding=4)
+RHF = transforms.RandomHorizontalFlip()
+RVF = transforms.RandomVerticalFlip()
+NRM = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+TT = transforms.ToTensor()
 TPIL = transforms.ToPILImage()
 
 
@@ -30,8 +30,6 @@ class MNIST_Dataset(Dataset):
             transforms.RandomHorizontalFlip(0.5),
             transforms.RandomRotation(10),
             transforms.ToTensor(),
-            # transforms.Normalize((0.4914, 0.4822, 0.4465),
-            #                      (0.2023, 0.1994, 0.2010)),
             transforms.Normalize((0.1307,), (0.3081,)),
         ])
 
@@ -502,6 +500,23 @@ def construct_ocr_dataset_aug(trainset, testset, seen_classes, val_classes, unse
 
         osr_testset = DatasetBuilder(
             [get_class_i(testset.data, testset.labels, idx) for idx in unseen_classes],
+            transform_test)
+    elif args.dataset in ['TinyImageNet']:
+        osr_trainset = DatasetBuilder(
+            [get_class_i(trainset.data, trainset.targets, idx) for idx in seen_classes],
+            transform_train)
+
+        osr_valset = DatasetBuilder(
+            [get_class_i(testset.data, testset.targets, idx) for idx in seen_classes],
+            transform_test)
+
+        if val_classes != None:
+            osr_pickset = DatasetBuilder(
+                [get_class_i(testset.data, testset.targets, idx) for idx in val_classes],
+                transform_test)
+
+        osr_testset = DatasetBuilder(
+            [get_class_i(testset.data, testset.targets, idx) for idx in unseen_classes],
             transform_test)
 
     if val_classes != None:
