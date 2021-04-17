@@ -148,7 +148,6 @@ class CIFAR100_Dataset(Dataset):
         # seen_classes = range(0, 10)
         unseen_classes = [idx for idx in range(100) if idx not in seen_classes]
         unseen_classes_num = args.unseen_num
-        # unseen_classes_num =
         unseen_classes = random.sample(unseen_classes, unseen_classes_num)
         val_classes = random.sample(unseen_classes, 5)
         unseen_classes = [idx for idx in unseen_classes if idx not in val_classes]
@@ -189,15 +188,12 @@ class CIFARAdd10_Dataset(Dataset):
             transforms.RandomResizedCrop(32, scale=(0.8, 1.0)),
             transforms.RandomHorizontalFlip(0.5),
             transforms.ToTensor(),
-            # transforms.Normalize((0.4914, 0.4822, 0.4465),
-            #                      (0.2023, 0.1994, 0.2010)),
-            transforms.Normalize(0.5,0.5),
+            transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                 (0.2023, 0.1994, 0.2010)),
         ])
         self.transform_test = transforms.Compose([transforms.Resize(32),
                                                   transforms.ToTensor(),
-                                                  # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-                                                  transforms.Normalize(0.5,0.5),
-                                                  ])
+                                                  transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
 
     def sampler_search(self, seed, args):
         if seed is not None:
@@ -355,16 +351,13 @@ class SVHN_Dataset(Dataset):
             transforms.RandomResizedCrop(32, scale=(0.7, 1.0)),
             transforms.RandomHorizontalFlip(0),
             transforms.ToTensor(),
-            # transforms.Normalize([0.4377, 0.4438, 0.4728],
-            #                      [0.1980, 0.2010, 0.1970]),
-            transforms.Normalize(0.5, 0.5),
+            transforms.Normalize([0.4377, 0.4438, 0.4728],
+                                 [0.1980, 0.2010, 0.1970]),
         ])
         self.transform_test = transforms.Compose([transforms.Resize(32),
                                                   transforms.ToTensor(),
-                                                  # transforms.Normalize([0.4377, 0.4438, 0.4728],
-                                                  #   [0.1980, 0.2010, 0.1970]),
-                                                  transforms.Normalize(0.5, 0.5),
-                                                  ])
+                                                  transforms.Normalize([0.4377, 0.4438, 0.4728],
+                                                    [0.1980, 0.2010, 0.1970])])
 
     def sampler_search(self, seed, args):
         if seed is not None:
@@ -388,7 +381,8 @@ class SVHN_Dataset(Dataset):
         unseen_classes = [idx for idx in range(10) if idx not in seen_classes]
         val_classes = random.sample(unseen_classes, 2)
         unseen_classes = [idx for idx in unseen_classes if idx not in val_classes]
-        seen_classes = seen_classes + val_classes
+        seen_classes = seen_classes + unseen_classes
+
         osr_trainset, osr_valset, osr_testset = construct_ocr_dataset_aug(self.trainset, self.testset,
                                                                       seen_classes, None, unseen_classes,
                                                                       self.transform_train, self.transform_test, args)
@@ -398,7 +392,7 @@ class SVHN_Dataset(Dataset):
 class TinyImageNet_Dataset(Dataset):
     def __init__(self):
         self.trainset = ImageFolder(root='./data/tiny-imagenet-200/train')
-        self.testset = ImageFolder(root='./data/tiny-imagenet-200/test')
+        self.testset = SVHN(root='./data/tiny-imagenet-200/test')
         # self.classDict = {'0': 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8,
         #                   '9': 9}
         self.transform_train = transforms.Compose([
@@ -474,7 +468,7 @@ def construct_ocr_dataset(trainset, testset, seen_classes, unseen_classes, trans
 
 
 def construct_ocr_dataset_aug(trainset, testset, seen_classes, val_classes, unseen_classes, transform_train, transform_test, args):
-    if args.dataset in ['MNIST', 'CIFAR10', 'CIFAR100', 'TinyImageNet']:
+    if args.dataset in ['MNIST', 'CIFAR10', 'CIFAR100']:
         osr_trainset = DatasetBuilder(
             [get_class_i(trainset.data, trainset.targets, idx) for idx in seen_classes],
             transform_train)

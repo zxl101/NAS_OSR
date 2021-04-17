@@ -10,6 +10,7 @@
 
 import numpy as np
 import torch
+from sklearn.metrics import roc_auc_score
 
 
 class Cls_Metrics(object):
@@ -18,38 +19,50 @@ class Cls_Metrics(object):
         self.correct8 = 0
         self.correct16 = 0
         self.correct32 = 0
+        self.correct_final = 0
         self.total = 0
+        # self.auroc = []
 
 
-    def update(self, pred8, pred16, pred32, target):
-        c8, c16, c32, total = batch_cls(pred8,pred16,pred32,target)
+    def update(self, pred8, pred16, pred32, pred_final, target):
+        c8, c16, c32, c_final, total = batch_cls(pred8,pred16,pred32,pred_final,target)
         self.correct8 += c8
         self.correct16 += c16
         self.correct32 += c32
+        self.correct_final += c_final
         self.total += total
+        # self.auroc.append(roc_auc_score(torch.Tensor.cpu(target).detach().numpy(), torch.Tensor.cpu(pred_final).detach().numpy()))
 
     def get_scores(self):
 
-        return self.correct8/self.total, self.correct16/self.total, self.correct32/self.total
+        return self.correct8/self.total, self.correct16/self.total, self.correct32/self.total, self.correct_final/self.total
 
     def reset(self):
         self.correct8 = 0
         self.correct16 = 0
         self.correct32 = 0
+        self.correct_final = 0
         self.total = 0
+        # self.auroc = []
 
 
-def batch_cls(pred8, pred16, pred32, target):
+def batch_cls(pred8, pred16, pred32, pred_final, target):
     c8 = 0
     c16 = 0
     c32 = 0
-    pred8 = pred8.data.max(1)[1]
-    c8 += pred8.eq(target.view_as(pred8)).sum().item()
-    pred16 = pred16.data.max(1)[1]
-    c16 += pred16.eq(target.view_as(pred16)).sum().item()
+    c_final = 0
+    if pred8 != None:
+        pred8 = pred8.data.max(1)[1]
+        c8 += pred8.eq(target.view_as(pred8)).sum().item()
+    if pred16 != None:
+        pred16 = pred16.data.max(1)[1]
+        c16 += pred16.eq(target.view_as(pred16)).sum().item()
     pred32 = pred32.data.max(1)[1]
     c32 += pred32.eq(target.view_as(pred32)).sum().item()
-    return c8, c16, c32, len(target)
+    if pred_final != None:
+        pred_final = pred_final.data.max(1)[1]
+        c_final += pred_final.eq(target.view_as(pred_final)).sum().item()
+    return c8, c16, c32, c_final, len(target)
 
 # def batch_pix_accuracy(predict, target):
 #     """Batch Pixel Accuracy

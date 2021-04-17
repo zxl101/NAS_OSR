@@ -31,7 +31,6 @@ C.lamda = 100
 C.val_interval   = 5
 C.use_cuda = True
 C.cuda = True
-C.unseen_num = 50
 """Path Config"""
 def add_path(path):
     if path not in sys.path:
@@ -112,4 +111,4 @@ C.is_train = True
 C.is_test = False # if True, prediction files for the test set will be generated
 C.is_eval = False # if True, the train.py will only do evaluation for once
 # C.eval_path = "train-64x64_teacher_batch25-20210126-182711" # path to pretrained directory to be evaluated
-C.eval_path = "best_model/CIFARAddN/train-64x64_teacher_batch64-20210411-130831-3202"
+C.eval_path = "train-64x64_teacher_batch128-20210304-102210"
