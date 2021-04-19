@@ -214,21 +214,16 @@ def ocr_test(args, lvae, train_loader, val_loader, test_loader):
         # get train feature
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(train_loader):
-                target_en = torch.Tensor(target.shape[0], args.num_classes)
-                target_en.zero_()
-                target_en.scatter_(1, target.view(-1, 1), 1)  # one-hot encoding
-                target_en = target_en.cuda()
                 if args.cuda:
                     data = data.cuda()
                     target = target.cuda()
                 data, target = Variable(data), Variable(target)
 
-                _, mu, _, _, output, _, x_re, _ = lvae(data, target_en)
+                _, mu, _, _, output, x_re, _ = lvae(data)
 
                 z_mu, y_mu = torch.split(mu, [10, 32], dim=1)
                 train_rec_loss = (x_re - data).pow(2).sum((3, 2, 1))
                 outlabel = output.data.max(1)[1]  # get the index of the max log-probability
-                # print(torch.max(outlabel))
                 train_fea = y_mu[(outlabel == target)]
                 train_tar = target[(outlabel == target)]
 

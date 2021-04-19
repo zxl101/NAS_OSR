@@ -11,20 +11,15 @@ import os
 from PIL import Image
 from pdb import set_trace as bp
 
-# from seg_oprs import FeatureFusion, Head
-
 BatchNorm2d = nn.BatchNorm2d
 
 def kl_normal(qm, qv, pm, pv, yh):
-	element_wise = 0.5 * (torch.log(pv) - torch.log(qv) + qv / pv + (qm - pm - yh).pow(2) / pv - 1)
-	# element_wise = 0.5 * (torch.log(pv) - torch.log(qv) - qv / pv - (qm - pm - yh).pow(2) / pv - 1)
-	kl = element_wise.sum(-1)
-	#print("log var1", qv)
-	return torch.mean(kl)
+    element_wise = 0.5 * (torch.log(pv) - torch.log(qv) + qv / pv + (qm - pm - yh).pow(2) / pv - 1)
+    kl = element_wise.sum(-1)
+    return torch.mean(kl)
 
 def sample_gaussian(m, v):
     sample = torch.randn(m.shape).to(torch.device("cuda"))
-    # sample = torch.randn(m.shape)
     m = m.cuda()
     v = v.cuda()
     z = m + (v ** 0.5) * sample
@@ -82,41 +77,6 @@ class FCONV(nn.Module):
         x_re = self.final(x)
         return x_re
 
-# class DoubleConv(nn.Module):
-#
-#     def __init__(self, in_channels, out_channels):
-#         super().__init__()
-#         self.double_conv = nn.Sequential(
-#             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-#             nn.BatchNorm2d(out_channels),
-#             nn.ReLU(inplace=True),
-#             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-#             nn.BatchNorm2d(out_channels),
-#             nn.ReLU(inplace=True)
-#         )
-#
-#     def forward(self, x):
-#         return self.double_conv(x)
-#
-# class Up(nn.Module):
-#     def __init__(self, in_channels, out_channels):
-#         super().__init__()
-#         self.up = nn.ConvTranspose2d(in_channels, in_channels//2, kernel_size=2, stride=2)
-#         self.conv = DoubleConv(in_channels, out_channels)
-#         self.conv2 = DoubleConv(in_channels//2, out_channels)
-#
-#     def forward(self, x1, x2=None):
-#         if x1 is None:
-#             return self.conv2(x2)
-#         x1 = self.up(x1)
-#
-#         if x2 is not None:
-#             x = torch.cat([x2, x1], dim =1)
-#             return self.conv(x)
-#         else:
-#             x = x1
-#             return self.conv2(x)
-#         # return self.conv(x)
 def path2downs(path):
     '''
     0 same 1 down
@@ -199,9 +159,6 @@ def alphas2ops_path_width(alphas, path, widths):
         path_compact.append(scale)
         if i < len(widths): widths_compact.append(width)
         ops.append(op)
-    # print(len(path_compact))
-    # print(min_len)
-    # assert len(path_compact) >= min_len
     return ops, path_compact, widths_compact
 
 
@@ -340,18 +297,8 @@ class Network_Multi_Path_Infer(nn.Module):
         self._stem_head_width = stem_head_width
         self.latency = 0
 
-        # self.stem = nn.Sequential(
-        #     ConvNorm(self.in_channel, self.num_filters(2, stem_head_width[0]) * 2, kernel_size=3, stride=2, padding=1,
-        #              bias=False, groups=1, slimmable=False),
-        #     BasicResidual2x(self.num_filters(2, stem_head_width[0]) * 2, self.num_filters(4, stem_head_width[0]) * 2,
-        #                     kernel_size=3, stride=2, groups=1, slimmable=False),
-        #     BasicResidual2x(self.num_filters(4, stem_head_width[0]) * 2, self.num_filters(8, stem_head_width[0]),
-        #                     kernel_size=3, stride=2, groups=1, slimmable=False)
-        # )
-
         self.down1 = ConvNorm(self.in_channel, self.num_filters(4, 1), kernel_size=1, stride=1, padding=0, bias=False,
                               groups=1, slimmable=False)
-        # self.down1 = nn.Sequential(nn.Conv2d(self.in_channel, self.num_filters(4, 1), kernel_size=3, stride=2, padding=1, bias=False), nn.BatchNorm2d(self.num_filters(4, 1)), nn.PReLU())
         self.down2 = BasicResidual2x(self.num_filters(4, 1), self.num_filters(8, 1), kernel_size=3, stride=2, groups=1,
                                      slimmable=False)
         self.down4 = BasicResidual2x(self.num_filters(8, 1), self.num_filters(16, 1), kernel_size=3, stride=2, groups=1,
@@ -474,7 +421,7 @@ class Network_Multi_Path_Infer(nn.Module):
             groups_all.append(branch_groups)
         return groups_all, cells
 
-    def agg_ffm(self, outputs, label_en):
+    def agg_ffm(self, outputs):
         outputs32 = outputs[4]
         outputs16 = outputs[3]
         outputs8 = outputs[2]
@@ -482,7 +429,7 @@ class Network_Multi_Path_Infer(nn.Module):
         outputs2 = outputs[0]
         latent_mu = self.mean_layer32(outputs32.view(-1, 1024 * self.last_size * self.last_size))
         latent_var = self.var_layer32(outputs32.view(-1, 1024 * self.last_size * self.last_size))
-        latent_var = F.softplus(latent_var) + 1e-8
+        # latent_var = F.softplus(latent_var) + 1e-8
 
         # print(latent_mu.shape)
         z_mu, y_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
@@ -492,16 +439,13 @@ class Network_Multi_Path_Infer(nn.Module):
 
         y_latent = sample_gaussian(y_mu, y_var)
         latent = sample_gaussian(latent_mu, latent_var)
-        # print(latent_var)
         predict = F.log_softmax(self.classifier(y_latent), dim=1)
         predict_test = F.log_softmax(self.classifier(y_mu), dim=1)
-        yh = self.one_hot32(label_en)
+        # yh = self.one_hot32(label_en)
 
         decoded = self.dec32(latent)
         decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
 
-        print(decoded.shape)
-        print(outputs32.shape)
         out32 = torch.cat((decoded, outputs32), dim=1)
         out16 = torch.cat((self.up32.decode(out32), outputs16), dim=1)
         out8 = torch.cat((self.up16.decode(out16), outputs8), dim=1)
@@ -511,28 +455,19 @@ class Network_Multi_Path_Infer(nn.Module):
         else:
             out4 = self.up8.decode(out8)
             out2 = self.up4.decode(out4)
-        # print(out2.shape)
         out1 = self.up2.decode(out2)
         reconstructed = self.refine1.final_decode(out1)
 
-        out = [outputs2, outputs4, outputs8, outputs16, outputs32]
-
         return latent, latent_mu, latent_var, \
-               predict, predict_test, yh, \
+               predict, predict_test,\
                reconstructed, outputs
 
 
-    def forward(self, input, label_en):
+    def forward(self, input):
         _, _, H, W = input.size()
         enc2 = self.down1(input)
         enc4 = self.down2(enc2)
         enc8 = self.down4(enc4)
-        # stem2 = self.stem[0](input)
-        # print(stem2.shape)
-        # stem2 = self.stem[1](stem2)
-        # print(stem2.shape)
-        # stem2 = self.stem[2](stem2)
-        # print(stem2.shape)
         outputs = [enc8] * self._branch
         # print(enc8.shape)
         for layer in range(len(self.branch_groups)):
@@ -549,15 +484,15 @@ class Network_Multi_Path_Infer(nn.Module):
                         outputs32 = output
 
         latent, latent_mu, latent_var, \
-        predict, predict_test, yh, \
-        reconstructed, outputs = self.agg_ffm([enc2, enc4, outputs8,outputs16,outputs32],label_en)
-        return latent, latent_mu, latent_var, predict, predict_test, yh, reconstructed, outputs
+        predict, predict_test, \
+        reconstructed, outputs = self.agg_ffm([enc2, enc4, outputs8, outputs16, outputs32])
+        return latent, latent_mu, latent_var, predict, predict_test, reconstructed, outputs
 
     def get_yh(self, y_de):
         yh = self.one_hot32(y_de)
         return yh
 
-    def contrastive_loss(self, x, latent_mu, latent_var, out, target, rec_x, img_index=None):
+    def contrastive_loss(self, x, latent_mu, out, target, rec_x, img_index=None):
         """
         z : batchsize * 10
         """
@@ -565,41 +500,27 @@ class Network_Multi_Path_Infer(nn.Module):
         ### get current yh for each class
         target_en = torch.eye(self._num_classes)
         class_yh = self.get_yh(target_en.cuda())  # 6*32
+
         yh_size = class_yh.size(1)
-
-        neg_class_num = self._num_classes - 1
-        # z_neg = z.unsqueeze(1).repeat(1, neg_class_num, 1)
-        y_neg = torch.zeros((bs, neg_class_num, yh_size)).cuda()
+        yh = torch.zeros(bs, yh_size).cuda()
+        y_all = torch.zeros(bs, self._num_classes, yh_size).cuda()
         for i in range(bs):
-            y_sample = [idx for idx in range(self._num_classes) if idx != torch.argmax(target[i])]
-            y_neg[i] = class_yh[y_sample]
-        # zy_neg = torch.cat([z_neg, y_neg], dim=2).view(bs*neg_class_num, z.size(1)+yh_size)
+            y_all[i] = class_yh
+            # print(target[i])
+            # if target[i] < self._num_classes:
+            yh[i] = class_yh[target[i]]
 
-        rec_x_neg = self.generate_cf(x, latent_mu, latent_var, out, target, y_neg)
-        # neg_idx = [idx for idx in range(self._num_classes) if idx != torch.argmax(target[0])]
-        # if img_index != None:
-        #     for i in range(rec_x_neg.shape[1]):
-        #         temp = rec_x_neg[0][i]
-        #         temp = torch.Tensor.cpu(temp).detach().numpy()
-        #         temp = temp.transpose(1, 2, 0)
-        #         temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
-        #         temp = temp * 255
-        #         temp = temp.astype(np.uint8)
-        #         img = Image.fromarray(temp)
-        #         img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, neg_idx[i])))
-
-        rec_x_all = torch.cat([rec_x.unsqueeze(1), rec_x_neg], dim=1)
+        rec_x_all = self.generate_cf(x, latent_mu, out, y_all)
 
         x_expand = x.unsqueeze(1).repeat(1, self._num_classes, 1, 1, 1)
         neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4)) * self.temperature  # N*(K+1)
         neg_dist[:, 0] = neg_dist[:, 0] - 0.5
-        label = torch.zeros(bs).cuda().long()
-        contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, label)
+        contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, target)
 
         if img_index != None:
             if img_index < 10:
-                for i in range(rec_x_neg.shape[1]):
-                    neg = torch.Tensor.cpu(y_neg[0]).detach().numpy()
+                for i in range(rec_x_all.shape[1]):
+                    neg = torch.Tensor.cpu(y_all[0]).detach().numpy()
                     c_yh = torch.Tensor.cpu(class_yh).detach().numpy()
                     dist = torch.Tensor.cpu(neg_dist).detach().numpy()
                     with open('cf_img/train_yh.txt', 'ab') as f:
@@ -612,7 +533,7 @@ class Network_Multi_Path_Infer(nn.Module):
                         np.savetxt(f, dist, fmt='%f', delimiter=' ', newline='\r')
                         f.write(b'\n')
 
-                    temp = rec_x_neg[0][i]
+                    temp = rec_x_all[0][i]
                     temp = torch.Tensor.cpu(temp).detach().numpy()
                     temp = temp.transpose(1, 2, 0)
                     temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
@@ -621,63 +542,11 @@ class Network_Multi_Path_Infer(nn.Module):
                     temp = temp * 255
                     temp = temp.astype(np.uint8)
                     img = Image.fromarray(temp)
-                    # img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, neg_idx[i])))
-                    img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, range(1, self._num_classes)[i])))
+                    img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, range(self._num_classes)[i])))
 
-        return contrastive_loss_euclidean
+        return contrastive_loss_euclidean, yh
 
-    def regroup_loss(self, latent_mu, out):
-
-        z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
-        y_latent_mu = y_latent_mu[torch.randperm(y_latent_mu.size()[0])]
-
-        latent_zy = torch.cat([z_latent_mu, y_latent_mu], dim=1)
-
-        decoded = self.dec32(latent_zy)
-        decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
-        # print(decoded.shape)
-        out32 = torch.cat((decoded, out[4]), dim=1)
-        out16 = torch.cat((self.up32.decode(out32), out[3]), dim=1)
-        out8 = torch.cat((self.up16.decode(out16), out[2]), dim=1)
-        if self.skip_connect:
-            out4 = torch.cat((self.up8.decode(out8), out[1]), dim=1)
-            out2 = torch.cat((self.up4.decode(out4), out[0]), dim=1)
-        else:
-            out4 = self.up8.decode(out8)
-            out2 = self.up4.decode(out4)
-        out1 = self.up2.decode(out2)
-        x_re = self.refine1.final_decode(out1)
-
-        target_en = torch.Tensor(latent_mu.shape[0], self._num_classes)
-        target_en.zero_()
-        target_en = target_en.cuda()
-        # _, latent_mu, _, _, _, _, _, _ = self.forward(x_re, target_en)
-
-        _, _, H, W = x_re.size()
-        enc2 = self.down1(x_re)
-        enc4 = self.down2(enc2)
-        enc8 = self.down4(enc4)
-        outputs = [enc8] * self._branch
-        # print(enc8.shape)
-        for layer in range(len(self.branch_groups)):
-            for group in self.branch_groups[layer]:
-                output = self.cells[str(layer) + "-" + str(group[0])](outputs[group[0]])
-                scale = int(H // output.size(2))
-                for branch in group:
-                    outputs[branch] = output
-                    if scale == 32:
-                        outputs32 = output
-        latent_mu = self.mean_layer32(outputs32.view(-1, 1024 * self.last_size * self.last_size))
-
-        pv = torch.ones(latent_mu.shape).cuda()
-        qv = torch.ones(latent_mu.shape).cuda()
-        loss = kl_normal(latent_mu, qv, latent_zy, pv, 0)
-
-        return loss
-
-
-
-    def generate_cf(self, x, latent_mu, latent_var, out, y_de, mean_y ,verbose=False):
+    def generate_cf(self, x, latent_mu, out, mean_y):
         """
         :param x:
         :param mean_y: list, the class-wise feature y
@@ -689,7 +558,6 @@ class Network_Multi_Path_Infer(nn.Module):
         bs = latent_mu.size(0)
 
         z_latent_mu, y_latent_mu =  torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
-        # z_latent_var, y_latent_var = torch.split(latent_var, [self.z_dim, self.latent_dim32], dim=1)
 
         z_latent_mu = z_latent_mu.unsqueeze(1).repeat(1, class_num, 1)
         if mean_y.dim() == 2:
@@ -714,70 +582,18 @@ class Network_Multi_Path_Infer(nn.Module):
 
         return x_re.view(bs, class_num, *x.size()[1:])
 
-    # def cf_pred(self, x, latent_mu, latent_var, out, target, image_idx=None):
-    #     """
-    #     z : batchsize * 10
-    #     """
-    #     bs = x.size(0)
-    #     ### get current yh for each class
-    #     target_en = torch.eye(self._num_classes)
-    #     class_yh = self.get_yh(target_en.cuda())  # 6*32
-    #     # print(class_yh.shape)
-    #     yh_size = class_yh.size(1)
-    #
-    #     # neg_class_num = self._num_classes - 1
-    #     # z_neg = z.unsqueeze(1).repeat(1, neg_class_num, 1)
-    #     y_all = torch.zeros((bs, self._num_classes, yh_size)).cuda()
-    #     for i in range(bs):
-    #         # y_sample = [idx for idx in range(self._num_classes)]
-    #         y_all[i] = class_yh
-    #     # zy_neg = torch.cat([z_neg, y_neg], dim=2).view(bs*neg_class_num, z.size(1)+yh_size)
-    #     # print(y_all)
-    #     rec_x_all = self.generate_cf(x, latent_mu, latent_var, out, target, y_all, verbose=False)
-    #     # neg_idx = [idx for idx in range(self._num_classes) if idx != torch.argmax(target[0])]
-    #
-    #     # if image_idx != None:
-    #     #     for i in range(rec_x_all.shape[1]):
-    #     #         temp = rec_x_all[0][i]
-    #     #         temp = torch.Tensor.cpu(temp).detach().numpy()
-    #     #         temp = temp.transpose(1, 2, 0)
-    #     #         # temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
-    #     #         temp = temp * 0.5 + 0.5
-    #     #         # temp = temp * 0.3081 + 0.1307
-    #     #         # temp = np.reshape(temp, (32, 32))
-    #     #         temp = temp * 255
-    #     #         temp = temp.astype(np.uint8)
-    #     #         img = Image.fromarray(temp)
-    #     #         img.save(os.path.join("cf_img", "{}_{}.jpeg".format(image_idx, i)))
-    #     # ori = torch.Tensor.cpu(x[0]).detach().numpy()
-    #     # ori = ori.transpose(1,2,0)
-    #     # ori = ori * 0.5 + 0.5
-    #     # ori = ori * 255
-    #     # ori = ori.astype(np.uint8)
-    #     # ori = Image.fromarray(ori)
-    #     # ori.save(os.path.join("cf_img","{}_{}.jpeg".format(image_idx,"ori")))
-    #     x_expand = x.unsqueeze(1).repeat(1, self._num_classes, 1, 1, 1)
-    #     neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4))  # N*(K+1)
-    #     pred = torch.argmax(neg_dist, dim=1)
-    #
-    #     return pred
-
     def rec_loss_cf(self, feature_y_mean, val_loader, test_loader, args):
         rec_loss_cf_all = []
         class_num = feature_y_mean.size(0)
         for data_test, target_test in val_loader:
-            target_test_en = torch.Tensor(target_test.shape[0], args.num_classes)
-            target_test_en.zero_()
-            target_test_en.scatter_(1, target_test.view(-1, 1), 1)  # one-hot encoding
-            target_test_en = target_test_en.cuda()
             if args.cuda:
                 data_test, target_test = data_test.cuda(), target_test.cuda()
             with torch.no_grad():
                 data_test, target_test = Variable(data_test), Variable(target_test)
 
-            _, latent_mu, latent_var, _, _, _, _, outputs = self.forward(data_test, target_test_en)
+            _, latent_mu, _, _, _, _, outputs = self.forward(data_test)
 
-            re_test = self.generate_cf(data_test, latent_mu, latent_var, outputs, target_test_en, feature_y_mean)
+            re_test = self.generate_cf(data_test, latent_mu, outputs, feature_y_mean)
             data_test_cf = data_test.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
             rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
             rec_loss_cf = rec_loss.min(1)[0]
@@ -785,18 +601,15 @@ class Network_Multi_Path_Infer(nn.Module):
 
 
         for data_test, target_test in test_loader:
-            target_test_en = torch.Tensor(target_test.shape[0], args.num_classes)
-            target_test_en.zero_()
-            # target_test_en.scatter_(1, target_test.view(-1, 1), 1)  # one-hot encoding
-            target_test_en = target_test_en.cuda()
+
             if args.cuda:
                 data_test, target_test = data_test.cuda(), target_test.cuda()
             with torch.no_grad():
                 data_test, target_test = Variable(data_test), Variable(target_test)
 
-            _, latent_mu, latent_var, _, _, _, _, outputs = self.forward(data_test, target_test_en)
+            _, latent_mu, _, _, _, _, outputs = self.forward(data_test)
 
-            re_test = self.generate_cf(data_test, latent_mu, latent_var, outputs, target_test_en, feature_y_mean)
+            re_test = self.generate_cf(data_test, latent_mu, outputs, feature_y_mean)
             data_test_cf = data_test.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
             rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
             rec_loss_cf = rec_loss.min(1)[0]
@@ -809,18 +622,14 @@ class Network_Multi_Path_Infer(nn.Module):
         rec_loss_cf_all = []
         class_num = feature_y_mean.size(0)
         for data_train, target_train in train_loader:
-            target_train_en = torch.Tensor(target_train.shape[0], args.num_classes)
-            target_train_en.zero_()
-            target_train_en.scatter_(1, target_train.view(-1, 1), 1)  # one-hot encoding
-            target_train_en = target_train_en.cuda()
             if args.cuda:
                 data_train, target_train = data_train.cuda(), target_train.cuda()
             with torch.no_grad():
                 data_train, target_train = Variable(data_train), Variable(target_train)
 
-            _, latent_mu, latent_var, _, _, _, _, outputs = self.forward(data_train, target_train_en)
+            _, latent_mu, _, _, _, _, outputs = self.forward(data_train)
 
-            re_train = self.generate_cf(data_train, latent_mu, latent_var, outputs, target_train_en, feature_y_mean)
+            re_train = self.generate_cf(data_train, latent_mu, outputs, feature_y_mean)
             data_train_cf = data_train.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
             rec_loss = (re_train - data_train_cf).pow(2).sum((2, 3, 4))
             rec_loss_cf = rec_loss.min(1)[0]
@@ -828,77 +637,3 @@ class Network_Multi_Path_Infer(nn.Module):
 
         rec_loss_cf_all = torch.cat(rec_loss_cf_all, 0)
         return rec_loss_cf_all
-
-
-    def forward_latency(self, size):
-        _, H, W = size
-        latency_total = 0
-        latency, size = self.stem[0].forward_latency(size);
-        latency_total += latency
-        latency, size = self.stem[1].forward_latency(size);
-        latency_total += latency
-        latency, size = self.stem[2].forward_latency(size);
-        latency_total += latency
-
-        # store the last feature map w. corresponding scale of each branch
-        outputs8 = [size] * self._branch
-        outputs16 = [size] * self._branch
-        outputs32 = [size] * self._branch
-        outputs = [size] * self._branch
-
-        for layer in range(len(self.branch_groups)):
-            for group in self.branch_groups[layer]:
-                latency, size = self.cells[str(layer) + "-" + str(group[0])].forward_latency(outputs[group[0]])
-                latency_total += latency
-                scale = int(H // size[1])
-                for branch in group:
-                    outputs[branch] = size
-                    if scale == 8:
-                        outputs8[branch] = size
-                    elif scale == 16:
-                        outputs16[branch] = size
-                    elif scale == 32:
-                        outputs32[branch] = size
-
-        for branch in range(self._branch):
-            last = self.lasts[branch]
-            if last == 2:
-                latency, size = self.arms32[0].forward_latency(outputs32[branch]);
-                latency_total += latency
-                latency, size = self.refines32[0].forward_latency((size[0] + self.ch_16, size[1] * 2, size[2] * 2));
-                latency_total += latency
-                latency, size = self.arms32[1].forward_latency(size);
-                latency_total += latency
-                latency, size = self.refines32[1].forward_latency((size[0] + self.ch_8_2, size[1] * 2, size[2] * 2));
-                latency_total += latency
-                out_size = size
-            elif last == 1:
-                latency, size = self.arms16.forward_latency(outputs16[branch]);
-                latency_total += latency
-                latency, size = self.refines16.forward_latency((size[0] + self.ch_8_1, size[1] * 2, size[2] * 2));
-                latency_total += latency
-                out_size = size
-            elif last == 0:
-                out_size = outputs8[branch]
-        latency, size = self.ffm.forward_latency((out_size[0] * self._branch, out_size[1], out_size[2]));
-        latency_total += latency
-        latency, size = self.heads8.forward_latency(size);
-        latency_total += latency
-        return latency_total, size
-    def latent_space(self, epoch=0, vis = False):
-        class_list = torch.eye(self._num_classes)
-        # print(class_list)
-        # encoded = torch.Tensor(num_class,num_class)
-        # encoded.zero_()
-        # encoded.scatter_(1, class_list.view(-1, 1), 1)
-        encoded = class_list.cuda()
-        class_latent = self.one_hot32(encoded)
-        class_latent = torch.Tensor.cpu(class_latent).detach().numpy()
-        pca = PCA(n_components=2)
-        pca_fea = pca.fit_transform(class_latent)
-        if vis:
-            fig = plt.figure(figsize=(8, 8))
-            ax = fig.add_subplot(1, 1, 1)
-            ax.scatter([x[0] for x in pca_fea], [x[1] for x in pca_fea], s=10)
-            plt.savefig(os.path.join("train_img", "{}.jpg".format(epoch)))
-        return class_latent

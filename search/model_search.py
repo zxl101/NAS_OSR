@@ -241,7 +241,8 @@ class Cell(nn.Module):
 class Network_Multi_Path(nn.Module):
     def __init__(self, num_classes=10, in_channel=3, layers=16, criterion=nn.CrossEntropyLoss(ignore_index=-1), Fch=16,
                  width_mult_list=[1.,], prun_modes=['arch_ratio',], stem_head_width=[(1., 1.),], latent_dim32 = 32*1,
-                 latent_dim64=64*1, latent_dim128=128*1, z_dim=10, temperature=1, beta=1, lamda=1, beta_z=1, total_epoch=50):
+                 latent_dim64=64*1, latent_dim128=128*1, z_dim=10, temperature=1, beta=1, lamda=1, beta_z=1,
+                 total_epoch=50, img_size=32, down_scale_last=4):
         super(Network_Multi_Path, self).__init__()
         self._num_classes = num_classes
         assert layers >= 3
@@ -263,14 +264,17 @@ class Network_Multi_Path(nn.Module):
         self.beta = DeterministicWarmup(total_epoch, beta)
         self.lamda = lamda
         self.beta_z = beta_z
+        self.img_size = img_size
+        self.down_scale_last = down_scale_last
+        self.last_size = self.img_size // (2 ** self.down_scale_last)
 
         self.one_hot32 = nn.Linear(self._num_classes, self.latent_dim32)
 
         self.mean_layer32 = nn.Sequential(
-            nn.Linear(int(1024 * 2 * 2), self.latent_dim32 + self.z_dim)
+            nn.Linear(int(1024 * self.last_size * self.last_size), self.latent_dim32 + self.z_dim)
         )
         self.var_layer32 = nn.Sequential(
-            nn.Linear(int(1024 * 2 * 2), self.latent_dim32 + self.z_dim)
+            nn.Linear(int(1024 * self.last_size * self.last_size), self.latent_dim32 + self.z_dim)
         )
 
 
@@ -305,7 +309,7 @@ class Network_Multi_Path(nn.Module):
             self.cells.append(cells)
 
 
-        self.dec32 = nn.Linear(self.latent_dim32 + self.z_dim, 1024*2*2)
+        self.dec32 = nn.Linear(self.latent_dim32 + self.z_dim, 1024*self.last_size*self.last_size)
         self.up32 = TCONV(2048, 512, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
         self.up16 = TCONV(1024, 256, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
         self.up8 = TCONV(512, 128, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
@@ -468,8 +472,8 @@ class Network_Multi_Path(nn.Module):
                         # mu_var_dic["{}_{}".format(i, j)] = [mu, var]
             out_prev = out
 
-        latent_mu = self.mean_layer32(out[2][0].view(-1,1024*2*2))
-        latent_var = self.var_layer32(out[2][0].view(-1,1024*2*2))
+        latent_mu = self.mean_layer32(out[2][0].view(-1,1024*self.last_size*self.last_size))
+        latent_var = self.var_layer32(out[2][0].view(-1,1024*self.last_size*self.last_size))
         latent_var = F.softplus(latent_var) + 1e-8
 
         # print(latent_mu.shape)
@@ -486,10 +490,10 @@ class Network_Multi_Path(nn.Module):
         yh = self.one_hot32(label_en)
 
         decoded = self.dec32(latent)
-        decoded = decoded.view(-1, 1024, 2, 2)
+        decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
 
         # print(decoded.shape)
-        # print(out[2][0].shape)
+        # print(out[2].shape)
         out32 = torch.cat((decoded, out[2][0]), dim=1)
         out16 = torch.cat((self.up32.decode(out32), out[1][0]), dim=1)
         out8 = torch.cat((self.up16.decode(out16), out[0][0]), dim=1)
@@ -808,7 +812,7 @@ class Network_Multi_Path(nn.Module):
 
         # partially downwards
         decoded = self.dec32(latent_zy)
-        decoded = decoded.view(-1, 1024, 2, 2)
+        decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
         # print(decoded.shape)
         out32 = torch.cat((decoded, out[4].repeat(class_num, 1,1,1)), dim=1)
         out16 = torch.cat((self.up32.decode(out32), out[3].repeat(class_num, 1,1,1)), dim=1)

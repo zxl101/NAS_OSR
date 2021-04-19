@@ -84,7 +84,7 @@ def main(pretrain=True):
         config.weight_decay = args.weight_decay
     if args.batch_size != None:
         config.batch_size = args.batch_size
-        config.niters_per_epoch = min(config.num_train_imgs // 2 // config.batch_size, 1000)
+        config.niters_per_epoch = config.num_train_imgs // 2 // config.batch_size
     if args.num_classes != None:
         config.num_classes = args.num_classes
     if args.nepochs != None:
@@ -170,7 +170,8 @@ def main(pretrain=True):
     # Model #######################################
     model = Network(config.num_classes, config.in_channel, config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list,
                     prun_modes=config.prun_modes, stem_head_width=config.stem_head_width, z_dim=config.z_dim,
-                    lamda=config.lamda, beta=config.beta, beta_z=config.beta_z, temperature=config.temperature)
+                    lamda=config.lamda, beta=config.beta, beta_z=config.beta_z, temperature=config.temperature,
+                    img_size=config.img_size)
 
     use_cuda = torch.cuda.is_available() and True
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -498,10 +499,10 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         total_kl_loss += kl_loss
         total_contras_loss += contras_loss
     total_val_loss = total_ce_loss + total_kl_loss + total_re_loss + total_contras_loss
-    val_loss = total_val_loss / count
-    val_rec = total_re_loss / count
-    val_kl = total_kl_loss / count
-    val_ce = total_ce_loss / count
+    val_loss = torch.mean(total_val_loss) / count
+    val_rec = torch.mean(total_re_loss) / count
+    val_kl = torch.mean(total_kl_loss) / count
+    val_ce = torch.mean(total_ce_loss) / count
     val_contras = total_contras_loss / count
     vallabel = predict.data.max(1)[1]  # get the index of the max log-probability
     correct_val += vallabel.eq(target_val.view_as(vallabel)).sum().item()
@@ -554,10 +555,10 @@ def test(model, train_loader, val_loader, test_loader, epoch, logger, device=tor
 
         total_num += len(target_val)
 
-        total_re_loss += re_loss
-        total_ce_loss += ce_loss
-        total_kl_loss += kl_loss
-        total_contras_loss += contras_loss
+        total_re_loss += torch.mean(re_loss)
+        total_ce_loss += torch.mean(ce_loss)
+        total_kl_loss += torch.mean(kl_loss)
+        total_contras_loss += torch.mean(contras_loss)
 
         vallabel = predict.data.max(1)[1]  # get the index of the max log-probability
         correct_val += vallabel.eq(target_val.view_as(vallabel)).sum().item()
@@ -584,7 +585,10 @@ def test(model, train_loader, val_loader, test_loader, epoch, logger, device=tor
         with open('%s/test_rec.txt' % config.save, 'ab') as l_val:
             np.savetxt(l_val, rec_val, fmt='%f', delimiter=' ', newline='\r')
             l_val.write(b'\n')
-
+    total_re_loss = torch.mean(total_re_loss)
+    total_kl_loss = torch.mean(total_kl_loss)
+    total_ce_loss = torch.mean(total_ce_loss)
+    total_contras_loss = torch.mean(total_contras_loss) 
     total_val_loss = total_ce_loss + total_kl_loss + total_re_loss + total_contras_loss
     val_loss = total_val_loss / total_num
     val_rec = total_re_loss / total_num

@@ -379,7 +379,7 @@ class SVHN_Dataset(Dataset):
         unseen_classes = [idx for idx in range(10) if idx not in seen_classes]
         val_classes = random.sample(unseen_classes, 2)
         unseen_classes = [idx for idx in unseen_classes if idx not in val_classes]
-        seen_classes = seen_classes + unseen_classes
+        seen_classes = seen_classes + val_classes
 
         osr_trainset, osr_valset, osr_testset = construct_ocr_dataset_aug(self.trainset, self.testset,
                                                                       seen_classes, None, unseen_classes,

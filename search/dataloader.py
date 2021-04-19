@@ -504,20 +504,20 @@ def construct_ocr_dataset_aug(trainset, testset, seen_classes, val_classes, unse
     elif args.dataset in ['TinyImageNet']:
         # print(trainset.)
         osr_trainset = DatasetBuilder(
-            [get_class_i(trainset.imgs, trainset.targets, idx) for idx in seen_classes],
+            [get_class_i(trainset.samples, trainset.targets, idx) for idx in seen_classes],
             transform_train)
 
         osr_valset = DatasetBuilder(
-            [get_class_i(testset.imgs, testset.targets, idx) for idx in seen_classes],
+            [get_class_i(testset.samples, testset.targets, idx) for idx in seen_classes],
             transform_test)
 
         if val_classes != None:
             osr_pickset = DatasetBuilder(
-                [get_class_i(testset.imgs, testset.targets, idx) for idx in val_classes],
+                [get_class_i(testset.samples, testset.targets, idx) for idx in val_classes],
                 transform_test)
 
         osr_testset = DatasetBuilder(
-            [get_class_i(testset.imgs, testset.targets, idx) for idx in unseen_classes],
+            [get_class_i(testset.samples, testset.targets, idx) for idx in unseen_classes],
             transform_test)
 
     if val_classes != None:
@@ -566,6 +566,16 @@ def get_class_i(x, y, i):
     pos_i = list(pos_i[:, 0])
     # Collect all data that match the desired label
     x_i = [x[j] for j in pos_i]
+    return x_i
+
+def get_class_i2(x, i):
+    """
+    x: trainset.train_data or testset.test_data
+    y: trainset.train_labels or testset.test_labels
+    i: class label, a number between 0 to 9
+    return: x_i
+    """
+    x_i = [a[0] for a in x if a[1] == i]
     return x_i
 
 # borrow from https://gist.github.com/Miladiouss/6ba0876f0e2b65d0178be7274f61ad2f
