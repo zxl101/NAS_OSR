@@ -5,7 +5,6 @@ from torchvision.datasets import MNIST, CIFAR10, CIFAR100, SVHN, ImageFolder
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import random
-import json
 import cv2
 from PIL import Image
 
@@ -405,7 +404,9 @@ class TinyImageNet_Dataset(Dataset):
                                                   transforms.ToTensor(),
                                                   transforms.Normalize([0.485, 0.456, 0.406],
                                                   [0.229, 0.224, 0.225])])
-
+        # print("The keys are")
+        # print(self.trainset.__dict__.keys())
+        # print(self.trainset.imgs[:10])
     def sampler_search(self, seed, args):
         if seed is not None:
             random.seed(seed)
@@ -566,6 +567,24 @@ def get_class_i(x, y, i):
     pos_i = list(pos_i[:, 0])
     # Collect all data that match the desired label
     x_i = [x[j] for j in pos_i]
+    return x_i
+
+def get_class_i2(x, y, i):
+    """
+    x: trainset.train_data or testset.test_data
+    y: trainset.train_labels or testset.test_labels
+    i: class label, a number between 0 to 9
+    return: x_i
+    """
+    # Convert to a numpy array
+    y = np.array(y)
+    # Locate position of labels that equal to i
+    pos_i = np.argwhere(y == i)
+    # Convert the result into a 1-D list
+    pos_i = list(pos_i[:, 0])
+    # Collect all data that match the desired label
+    x_i = [[cv2.imread(x[j][0]), x[j][1]] for j in pos_i]
+    # print(x_i[:10])
     return x_i
 
 # borrow from https://gist.github.com/Miladiouss/6ba0876f0e2b65d0178be7274f61ad2f
