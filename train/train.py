@@ -271,9 +271,6 @@ def main():
     config.beta_scheduler = DeterministicWarmup(config.nepochs, config.beta)
 
 
-    # reconstruction_function = nn.MSELoss()
-    # reconstruction_function.size_average = False
-
     seed_sampler = int(args.seed_sampler)
     # train_dataset, val_dataset, pick_dataset, test_dataset = load_dataset.sampler_search(seed_sampler, args)
     train_dataset, val_dataset, test_dataset = load_dataset.sampler_train(seed_sampler, args)
@@ -420,12 +417,14 @@ def train(train_loader, model, optimizer, logger, epoch):
         imgs, target = Variable(imgs), Variable(target)
 
         description = ""
-
+        print("The class of the vector is:")
+        print(torch.Tensor.cpu(target[0]).detach().numpy())
         latent, latent_mu, latent_var, predict, predict_test, reconstructed, outputs = model(imgs)
 
         contras, yh = model.module.contrastive_loss(imgs, latent_mu, outputs, target, reconstructed, img_index)
         contras_loss = config.wcontras * contras
         epoch_contras_loss += contras_loss
+
 
         rec = reconstruction_function(reconstructed, imgs)
         re_loss = config.wre * rec
@@ -446,6 +445,8 @@ def train(train_loader, model, optimizer, logger, epoch):
 
         loss = ce_loss + kl_loss + re_loss + contras_loss
         rec_loss = (reconstructed - imgs).pow(2).sum((3, 2, 1))
+
+
         loss.backward()
         optimizer.step()
 

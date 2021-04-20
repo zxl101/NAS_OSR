@@ -422,6 +422,7 @@ class Network_Multi_Path_Infer(nn.Module):
         return groups_all, cells
 
     def agg_ffm(self, outputs):
+        global check_vec
         outputs32 = outputs[4]
         outputs16 = outputs[3]
         outputs8 = outputs[2]
@@ -429,21 +430,20 @@ class Network_Multi_Path_Infer(nn.Module):
         outputs2 = outputs[0]
         latent_mu = self.mean_layer32(outputs32.view(-1, 1024 * self.last_size * self.last_size))
         latent_var = self.var_layer32(outputs32.view(-1, 1024 * self.last_size * self.last_size))
-        # latent_var = F.softplus(latent_var) + 1e-8
+        latent_var = F.softplus(latent_var) + 1e-8
 
-        # print(latent_mu.shape)
+
         z_mu, y_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
         z_var, y_var = torch.split(latent_var, [self.z_dim, self.latent_dim32], dim=1)
-        z_var = F.softplus(z_var) + 1e-8
-        y_var = F.softplus(y_var) + 1e-8
+        # z_var = F.softplus(z_var) + 1e-8
+        # y_var = F.softplus(y_var) + 1e-8
 
         y_latent = sample_gaussian(y_mu, y_var)
         latent = sample_gaussian(latent_mu, latent_var)
         predict = F.log_softmax(self.classifier(y_latent), dim=1)
         predict_test = F.log_softmax(self.classifier(y_mu), dim=1)
-        # yh = self.one_hot32(label_en)
 
-        decoded = self.dec32(latent)
+        decoded = self.dec32(latent_mu)
         decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
 
         out32 = torch.cat((decoded, outputs32), dim=1)
@@ -458,6 +458,9 @@ class Network_Multi_Path_Infer(nn.Module):
         out1 = self.up2.decode(out2)
         reconstructed = self.refine1.final_decode(out1)
 
+        print("The latent vector is")
+        print(torch.Tensor.cpu(outputs[4][0]).detach().numpy())
+        check_vec = outputs[4][0]
         return latent, latent_mu, latent_var, \
                predict, predict_test,\
                reconstructed, outputs
@@ -482,10 +485,15 @@ class Network_Multi_Path_Infer(nn.Module):
                         outputs16 = output
                     elif scale == 16:
                         outputs32 = output
-
+        # print(enc8)
+        # print(outputs32)
         latent, latent_mu, latent_var, \
         predict, predict_test, \
         reconstructed, outputs = self.agg_ffm([enc2, enc4, outputs8, outputs16, outputs32])
+        # print("The latent vector of the reconstructed image is")
+        # print(torch.Tensor.cpu(latent_mu[0][10:]).detach().numpy())
+        # print("The reconstructed image is")
+        # print(torch.Tensor.cpu(reconstructed[0]).detach().numpy())
         return latent, latent_mu, latent_var, predict, predict_test, reconstructed, outputs
 
     def get_yh(self, y_de):
@@ -514,7 +522,7 @@ class Network_Multi_Path_Infer(nn.Module):
 
         x_expand = x.unsqueeze(1).repeat(1, self._num_classes, 1, 1, 1)
         neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4)) * self.temperature  # N*(K+1)
-        neg_dist[:, 0] = neg_dist[:, 0] - 0.5
+        # neg_dist[:, 0] = neg_dist[:, 0] - 0.5
         contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, target)
 
         if img_index != None:
@@ -543,7 +551,7 @@ class Network_Multi_Path_Infer(nn.Module):
                     temp = temp.astype(np.uint8)
                     img = Image.fromarray(temp)
                     img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, range(self._num_classes)[i])))
-
+        # print(yh)
         return contrastive_loss_euclidean, yh
 
     def generate_cf(self, x, latent_mu, out, mean_y):
@@ -551,13 +559,14 @@ class Network_Multi_Path_Infer(nn.Module):
         :param x:
         :param mean_y: list, the class-wise feature y
         """
+        global check_vec
         if mean_y.dim() == 2:
             class_num = mean_y.size(0)
         elif mean_y.dim() == 3:
             class_num = mean_y.size(1)
         bs = latent_mu.size(0)
 
-        z_latent_mu, y_latent_mu =  torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+        z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
 
         z_latent_mu = z_latent_mu.unsqueeze(1).repeat(1, class_num, 1)
         if mean_y.dim() == 2:
@@ -565,6 +574,9 @@ class Network_Multi_Path_Infer(nn.Module):
         elif mean_y.dim() == 3:
             y_mu = mean_y
         latent_zy = torch.cat([z_latent_mu, y_mu], dim=2).view(bs*class_num, latent_mu.size(1))
+        # for i in range(6):
+        #     print("The vector of the {} image is".format(i))
+        #     print(torch.Tensor.cpu(latent_zy[i][10:]).detach().numpy())
 
         decoded = self.dec32(latent_zy)
         decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
@@ -579,7 +591,15 @@ class Network_Multi_Path_Infer(nn.Module):
             out2 = self.up4.decode(out4)
         out1 = self.up2.decode(out2)
         x_re = self.refine1.final_decode(out1)
-
+        for i in range(6):
+            # print("The {} image is".format(i))
+            # print(torch.Tensor.cpu(x_re[i]).detach().numpy())
+            print("The latent vector of {} image is".format(i))
+            print(torch.Tensor.cpu(out[4][i]).detach().numpy())
+        for i in range(6):
+            diff = torch.mean((check_vec-out[4][i]).pow(2))
+            print("The difference between {} image is".format(i))
+            print(torch.Tensor.cpu(diff).detach().numpy())
         return x_re.view(bs, class_num, *x.size()[1:])
 
     def rec_loss_cf(self, feature_y_mean, val_loader, test_loader, args):
