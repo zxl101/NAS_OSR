@@ -458,9 +458,9 @@ class Network_Multi_Path_Infer(nn.Module):
         out1 = self.up2.decode(out2)
         reconstructed = self.refine1.final_decode(out1)
 
-        print("The latent vector is")
-        print(torch.Tensor.cpu(outputs[4][0]).detach().numpy())
-        check_vec = outputs[4][0]
+        # print("The latent vector is")
+        # print(torch.Tensor.cpu(reconstructed[0]).detach().numpy())
+        check_vec = reconstructed[0]
         return latent, latent_mu, latent_var, \
                predict, predict_test,\
                reconstructed, outputs
@@ -580,26 +580,26 @@ class Network_Multi_Path_Infer(nn.Module):
 
         decoded = self.dec32(latent_zy)
         decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
-        out32 = torch.cat((decoded, out[4].repeat(class_num, 1,1,1)), dim=1)
-        out16 = torch.cat((self.up32.decode(out32), out[3].repeat(class_num, 1,1,1)), dim=1)
-        out8 = torch.cat((self.up16.decode(out16), out[2].repeat(class_num, 1,1,1)), dim=1)
+        out32 = torch.cat((decoded, out[4].repeat_interleave(class_num, dim=0)), dim=1)
+        out16 = torch.cat((self.up32.decode(out32), out[3].repeat_interleave(class_num, dim=0)), dim=1)
+        out8 = torch.cat((self.up16.decode(out16), out[2].repeat_interleave(class_num, dim=0)), dim=1)
         if self.skip_connect:
-            out4 = torch.cat((self.up8.decode(out8), out[1].repeat(class_num, 1,1,1)), dim=1)
-            out2 = torch.cat((self.up4.decode(out4), out[0].repeat(class_num, 1,1,1)), dim=1)
+            out4 = torch.cat((self.up8.decode(out8), out[1].repeat_interleave(class_num, dim=0)), dim=1)
+            out2 = torch.cat((self.up4.decode(out4), out[0].repeat_interleave(class_num, dim=0)), dim=1)
         else:
             out4 = self.up8.decode(out8)
             out2 = self.up4.decode(out4)
         out1 = self.up2.decode(out2)
         x_re = self.refine1.final_decode(out1)
-        for i in range(6):
-            # print("The {} image is".format(i))
-            # print(torch.Tensor.cpu(x_re[i]).detach().numpy())
-            print("The latent vector of {} image is".format(i))
-            print(torch.Tensor.cpu(out[4][i]).detach().numpy())
-        for i in range(6):
-            diff = torch.mean((check_vec-out[4][i]).pow(2))
-            print("The difference between {} image is".format(i))
-            print(torch.Tensor.cpu(diff).detach().numpy())
+        # for i in range(6):
+        #     # print("The {} image is".format(i))
+        #     # print(torch.Tensor.cpu(x_re[i]).detach().numpy())
+        #     print("The latent vector of {} image is".format(i))
+        #     print(torch.Tensor.cpu(x_re[i]).detach().numpy())
+        # for i in range(6):
+        #     diff = torch.mean((check_vec-x_re[i]).pow(2))
+        #     print("The difference between {} image is".format(i))
+        #     print(torch.Tensor.cpu(diff).detach().numpy())
         return x_re.view(bs, class_num, *x.size()[1:])
 
     def rec_loss_cf(self, feature_y_mean, val_loader, test_loader, args):

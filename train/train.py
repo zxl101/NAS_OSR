@@ -417,8 +417,8 @@ def train(train_loader, model, optimizer, logger, epoch):
         imgs, target = Variable(imgs), Variable(target)
 
         description = ""
-        print("The class of the vector is:")
-        print(torch.Tensor.cpu(target[0]).detach().numpy())
+        # print("The class of the vector is:")
+        # print(torch.Tensor.cpu(target[0]).detach().numpy())
         latent, latent_mu, latent_var, predict, predict_test, reconstructed, outputs = model(imgs)
 
         contras, yh = model.module.contrastive_loss(imgs, latent_mu, outputs, target, reconstructed, img_index)
