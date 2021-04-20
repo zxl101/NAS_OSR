@@ -522,7 +522,7 @@ class Network_Multi_Path_Infer(nn.Module):
 
         x_expand = x.unsqueeze(1).repeat(1, self._num_classes, 1, 1, 1)
         neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4)) * self.temperature  # N*(K+1)
-        # neg_dist[:, 0] = neg_dist[:, 0] - 0.5
+        neg_dist[:, target] = neg_dist[:, target] - 0.005 * self.temperature
         contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, target)
 
         if img_index != None:

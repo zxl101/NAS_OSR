@@ -358,7 +358,7 @@ def main():
             adjust_learning_rate(base_lr, 0.992, optimizer, epoch+1, config.nepochs)
 
             # validation
-            if not config.is_test and ((epoch+1) % 1 == 0 or epoch == 0):
+            if not config.is_test and (epoch % 5 == 0 or epoch == 0):
                 tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
                 with torch.no_grad():
                     f1_score = test(model, train_loader, val_loader, test_loader, epoch, logger, True)
