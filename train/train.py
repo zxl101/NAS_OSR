@@ -155,13 +155,14 @@ parser.add_argument('--threshold', type=float, default=0.5, help='threshold of g
 parser.add_argument('--z_dim', type=int, default=None)
 parser.add_argument('--latent_dim32', type=int, default=32)
 parser.add_argument('--temperature', type=float, default=None)
-parser.add_argument('--skip_connect', action="store_true", default =False, help='use skip connection on downscale 1/2 and 1/4')
+parser.add_argument('--skip_connect', type=float, default=1, help='use skip connection')
 parser.add_argument('--wre', type=float, default=1)
 parser.add_argument('--wregroup', type=float, default=1)
 parser.add_argument('--test', action='store_true', default=False)
 parser.add_argument('--unseen_num', type=int, default=None)
 parser.add_argument('--load', type=str, default=None)
 parser.add_argument('--wcontras', type=float, default=1)
+parser.add_argument('--is_eval', action="store_true", default=False)
 args = parser.parse_args()
 
 
@@ -178,6 +179,7 @@ def main():
     config.wcontras = args.wcontras
     config.wregroup = args.wregroup
     config.test = args.test
+    config.is_eval = args.is_eval
     if args.temperature != None:
         config.temperature = args.temperature
     if args.z_dim != None:
@@ -337,8 +339,22 @@ def main():
         #     if param.requires_grad:
         #         print(name)
         # print("--------------------------------------------------------------------")
-
-    if config.is_train:
+    print(config.is_eval)
+    if config.is_eval:
+        config.save = config.eval_path
+        print("start evaluation")
+        model.eval()
+        best_f1_score = 0
+        best_threshold = 0.5
+        for threshold in np.arange(0.5, 0.95, 0.05):
+            config.threshold = threshold
+            f1_score = test(model, train_loader, val_loader, test_loader, 1, logger, False)
+            print("The f1 score of threshold {} is {}".format(threshold, f1_score))
+            if f1_score > best_f1_score:
+                best_f1_score = f1_score
+                best_threshold = threshold
+        print("The best f1 score is {} at threshold {}".format(best_f1_score, best_threshold))
+    elif config.is_train:
         best_f1 = 0
         tbar = tqdm(range(config.nepochs), ncols=80)
         optimizer = sgd_optimizer

@@ -89,4 +89,4 @@ if C.mode == "teacher":
 C.is_train = True
 C.is_test = False # if True, prediction files for the test set will be generated
 C.is_eval = False # if True, the train.py will only do evaluation for once
-C.eval_path = "train-64x64_teacher_batch128-20210304-102210"
+C.eval_path = "train-64x64_teacher_batch64-20210420-144953-6440"

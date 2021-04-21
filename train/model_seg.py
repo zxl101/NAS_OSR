@@ -329,17 +329,25 @@ class Network_Multi_Path_Infer(nn.Module):
 
 
         self.dec32 = nn.Linear(self.latent_dim32 + self.z_dim, 1024 * self.last_size * self.last_size)
-        self.up32 = TCONV(2048, 512, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
-        self.up16 = TCONV(1024, 256, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
-        self.up8 = TCONV(512, 128, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
-        if self.skip_connect:
-            self.up4 = TCONV(256, 64, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
-            self.up2 = TCONV(128, 64, t_kernel=1, t_stride=1, t_padding=0, outpadding=0)
-            self.refine1 = FCONV(64, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
-        else:
+        if self.skip_connect == 0:
+            self.up32 = TCONV(1024, 512, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up16 = TCONV(512, 256, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up8 = TCONV(256, 128, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
             self.up4 = TCONV(128, 64, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
             self.up2 = TCONV(64, 32, t_kernel=1, t_stride=1, t_padding=0, outpadding=0)
             self.refine1 = FCONV(32, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
+        else:
+            self.up32 = TCONV(2048, 512, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up16 = TCONV(1024, 256, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up8 = TCONV(512, 128, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            if self.skip_connect == 1:
+                self.up4 = TCONV(256, 64, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+                self.up2 = TCONV(128, 32, t_kernel=1, t_stride=1, t_padding=0, outpadding=0)
+                self.refine1 = FCONV(32, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
+            else:
+                self.up4 = TCONV(128, 64, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+                self.up2 = TCONV(64, 32, t_kernel=1, t_stride=1, t_padding=0, outpadding=0)
+                self.refine1 = FCONV(32, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
 
         self.classifier = nn.Linear(self.latent_dim32, self._num_classes)
 
@@ -446,15 +454,23 @@ class Network_Multi_Path_Infer(nn.Module):
         decoded = self.dec32(latent_mu)
         decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
 
-        out32 = torch.cat((decoded, outputs32), dim=1)
-        out16 = torch.cat((self.up32.decode(out32), outputs16), dim=1)
-        out8 = torch.cat((self.up16.decode(out16), outputs8), dim=1)
-        if self.skip_connect:
-            out4 = torch.cat((self.up8.decode(out8), outputs4), dim=1)
-            out2 = torch.cat((self.up4.decode(out4), outputs2), dim=1)
-        else:
+
+        if self.skip_connect == 0:
+            out32 = outputs32
+            out16 = self.up32.decode(out32)
+            out8 = self.up16.decode(out16)
             out4 = self.up8.decode(out8)
             out2 = self.up4.decode(out4)
+        else:
+            out32 = torch.cat((decoded, outputs32), dim=1)
+            out16 = torch.cat((self.up32.decode(out32), outputs16), dim=1)
+            out8 = torch.cat((self.up16.decode(out16), outputs8), dim=1)
+            if self.skip_connect == 1:
+                out4 = torch.cat((self.up8.decode(out8), outputs4), dim=1)
+                out2 = torch.cat((self.up4.decode(out4), outputs2), dim=1)
+            else:
+                out4 = self.up8.decode(out8)
+                out2 = self.up4.decode(out4)
         out1 = self.up2.decode(out2)
         reconstructed = self.refine1.final_decode(out1)
 
@@ -580,15 +596,22 @@ class Network_Multi_Path_Infer(nn.Module):
 
         decoded = self.dec32(latent_zy)
         decoded = decoded.view(-1, 1024, self.last_size, self.last_size)
-        out32 = torch.cat((decoded, out[4].repeat_interleave(class_num, dim=0)), dim=1)
-        out16 = torch.cat((self.up32.decode(out32), out[3].repeat_interleave(class_num, dim=0)), dim=1)
-        out8 = torch.cat((self.up16.decode(out16), out[2].repeat_interleave(class_num, dim=0)), dim=1)
-        if self.skip_connect:
-            out4 = torch.cat((self.up8.decode(out8), out[1].repeat_interleave(class_num, dim=0)), dim=1)
-            out2 = torch.cat((self.up4.decode(out4), out[0].repeat_interleave(class_num, dim=0)), dim=1)
-        else:
+        if self.skip_connect == 0:
+            out32 = decoded
+            out16 = self.up32.decode(out32)
+            out8 = self.up16.decode(out16)
             out4 = self.up8.decode(out8)
             out2 = self.up4.decode(out4)
+        else:
+            out32 = torch.cat((decoded, out[4].repeat_interleave(class_num, dim=0)), dim=1)
+            out16 = torch.cat((self.up32.decode(out32), out[3].repeat_interleave(class_num, dim=0)), dim=1)
+            out8 = torch.cat((self.up16.decode(out16), out[2].repeat_interleave(class_num, dim=0)), dim=1)
+            if self.skip_connect == 1:
+                out4 = torch.cat((self.up8.decode(out8), out[1].repeat_interleave(class_num, dim=0)), dim=1)
+                out2 = torch.cat((self.up4.decode(out4), out[0].repeat_interleave(class_num, dim=0)), dim=1)
+            else:
+                out4 = self.up8.decode(out8)
+                out2 = self.up4.decode(out4)
         out1 = self.up2.decode(out2)
         x_re = self.refine1.final_decode(out1)
         # for i in range(6):
