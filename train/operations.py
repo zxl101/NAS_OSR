@@ -127,6 +127,22 @@ class ConvNorm(nn.Module):
         x = self.conv(x)
         return x
 
+class BestNATS(nn.Module):
+    def __init__(self, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1, slimmable=True, width_mult_list=[1.]):
+        super(BestNATS, self).__init__()
+        self.C_in = C_in
+        self.C_out = C_out
+        self.stride = stride
+
+        self.op0_1 = ConvNorm(C_in, C_out, kernel_size=3, stride=stride)
+        self.op0_2 = ConvNorm(C_in, C_out/2, kernel_size=3, stride=stride)
+        self.op1_2 = ConvNorm(C_in, C_out/2, kernel_size=3, stride=1)
+        self.op0_3 = ConvNorm(C_in, C_out/3, kernel_size=1, stride=stride)
+        self.op1_3 = ConvNorm(C_in, C_out/3, kernel_size=1, stride=1)
+        self.op2_3 = ConvNorm(C_in, C_out/3, kernel_size=3, stride=1)
+
+
+
 
 class BasicResidual1x(nn.Module):
     def __init__(self, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1, slimmable=True, width_mult_list=[1.]):
