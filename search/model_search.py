@@ -242,7 +242,7 @@ class Network_Multi_Path(nn.Module):
     def __init__(self, num_classes=10, in_channel=3, layers=16, criterion=nn.CrossEntropyLoss(ignore_index=-1), Fch=16,
                  width_mult_list=[1.,], prun_modes=['arch_ratio',], stem_head_width=[(1., 1.),], latent_dim32 = 32*1,
                  latent_dim64=64*1, latent_dim128=128*1, z_dim=10, temperature=1, beta=1, lamda=1, beta_z=1,
-                 total_epoch=50, img_size=32, down_scale_last=4):
+                 total_epoch=50, img_size=32, down_scale_last=4, skip_connect=1):
         super(Network_Multi_Path, self).__init__()
         self._num_classes = num_classes
         assert layers >= 3
@@ -264,6 +264,7 @@ class Network_Multi_Path(nn.Module):
         self.beta = DeterministicWarmup(total_epoch, beta)
         self.lamda = lamda
         self.beta_z = beta_z
+        self.skip_connect = skip_connect
         self.img_size = img_size
         self.down_scale_last = down_scale_last
         self.last_size = self.img_size // (2 ** self.down_scale_last)
@@ -310,12 +311,25 @@ class Network_Multi_Path(nn.Module):
 
 
         self.dec32 = nn.Linear(self.latent_dim32 + self.z_dim, 1024*self.last_size*self.last_size)
-        self.up32 = TCONV(2048, 512, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
-        self.up16 = TCONV(1024, 256, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
-        self.up8 = TCONV(512, 128, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
-        self.up4 = TCONV(256, 64, t_kernel=3, t_stride=2 , t_padding=1, outpadding=1)
-        self.up2 = TCONV(128, 64, t_kernel=1, t_stride=1, t_padding=0,outpadding=0)
-        self.refine1 = FCONV(64, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
+        if self.skip_connect == 0:
+            self.up32 = TCONV(1024, 512, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up16 = TCONV(512, 256, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up8 = TCONV(256, 128, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up4 = TCONV(128, 64, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up2 = TCONV(64, 32, t_kernel=1, t_stride=1, t_padding=0, outpadding=0)
+            self.refine1 = FCONV(32, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
+        else:
+            self.up32 = TCONV(2048, 512, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up16 = TCONV(1024, 256, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            self.up8 = TCONV(512, 128, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+            if self.skip_connect == 1:
+                self.up4 = TCONV(256, 64, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+                self.up2 = TCONV(128, 32, t_kernel=1, t_stride=1, t_padding=0, outpadding=0)
+                self.refine1 = FCONV(32, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
+            else:
+                self.up4 = TCONV(128, 64, t_kernel=3, t_stride=2, t_padding=1, outpadding=1)
+                self.up2 = TCONV(64, 32, t_kernel=1, t_stride=1, t_padding=0, outpadding=0)
+                self.refine1 = FCONV(32, self.in_channel, t_kernel=1, t_stride=1, t_padding=0)
 
         # contains arch_param names: {"alphas": alphas, "betas": betas, "ratios": ratios}
         self._arch_names = []
@@ -494,11 +508,22 @@ class Network_Multi_Path(nn.Module):
 
         # print(decoded.shape)
         # print(out[2].shape)
-        out32 = torch.cat((decoded, out[2][0]), dim=1)
-        out16 = torch.cat((self.up32.decode(out32), out[1][0]), dim=1)
-        out8 = torch.cat((self.up16.decode(out16), out[0][0]), dim=1)
-        out4 = torch.cat((self.up8.decode(out8), enc4), dim=1)
-        out2 = torch.cat((self.up4.decode(out4), enc2), dim=1)
+        if self.skip_connect == 0:
+            out32 = out[2][0]
+            out16 = self.up32.decode(out32)
+            out8 = self.up16.decode(out16)
+            out4 = self.up8.decode(out8)
+            out2 = self.up4.decode(out4)
+        else:
+            out32 = torch.cat((decoded, out[2][0]), dim=1)
+            out16 = torch.cat((self.up32.decode(out32), out[1][0]), dim=1)
+            out8 = torch.cat((self.up16.decode(out16), out[0][0]), dim=1)
+            if self.skip_connect == 1:
+                out4 = torch.cat((self.up8.decode(out8), enc4), dim=1)
+                out2 = torch.cat((self.up4.decode(out4), enc2), dim=1)
+            else:
+                out4 = self.up8.decode(out8)
+                out2 = self.up4.decode(out4)
         out1 = self.up2.decode(out2)
         reconstructed = self.refine1.final_decode(out1)
 

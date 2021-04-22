@@ -64,6 +64,7 @@ parser.add_argument('--pretrain_nepochs', type=int, default=None)
 parser.add_argument('--pretrain_metric', type=str, default='f1_score')
 parser.add_argument('--search_metric', type=str, default='f1_score')
 parser.add_argument('--unseen_num', type=int, default=None)
+parser.add_argument('--skip_connect', type=float, default=1, help='use skip connection')
 args = parser.parse_args()
 
 def cycle(iterable):
@@ -106,6 +107,7 @@ def main(pretrain=True):
     config.cuda = True
     config.pretrain_metric = args.pretrain_metric
     config.search_metric = args.search_metric
+    config.skip_connect = args.skip_connect
 
     if args.dataset == "MNIST":
         load_dataset = MNIST_Dataset()
@@ -171,7 +173,7 @@ def main(pretrain=True):
     model = Network(config.num_classes, config.in_channel, config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list,
                     prun_modes=config.prun_modes, stem_head_width=config.stem_head_width, z_dim=config.z_dim,
                     lamda=config.lamda, beta=config.beta, beta_z=config.beta_z, temperature=config.temperature,
-                    img_size=config.img_size)
+                    img_size=config.img_size, skip_connect=config.skip_connect)
 
     use_cuda = torch.cuda.is_available() and True
     device = torch.device("cuda" if use_cuda else "cpu")

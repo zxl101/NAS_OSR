@@ -270,7 +270,7 @@ class Network_Multi_Path_Infer(nn.Module):
                  criterion=nn.CrossEntropyLoss(ignore_index=-1),
                  Fch=16, width_mult_list=[1., ], stem_head_width=(1., 1.), latent_dim32=32*1,
                  latent_dim64=64*1, latent_dim128=128*1, temperature=1, z_dim=10, img_size=64, down_scale_last=4,
-                 skip_connect=True, wcontras=1):
+                 skip_connect=1, wcontras=1):
         super(Network_Multi_Path_Infer, self).__init__()
         self._num_classes = num_classes
         assert layers >= 2
@@ -570,7 +570,7 @@ class Network_Multi_Path_Infer(nn.Module):
         # print(yh)
         return contrastive_loss_euclidean, yh
 
-    def generate_cf(self, x, latent_mu, out, mean_y):
+    def generate_cf(self, x, latent_mu, out, mean_y, img_index=None, save_folder="cf_img"):
         """
         :param x:
         :param mean_y: list, the class-wise feature y
@@ -623,7 +623,21 @@ class Network_Multi_Path_Infer(nn.Module):
         #     diff = torch.mean((check_vec-x_re[i]).pow(2))
         #     print("The difference between {} image is".format(i))
         #     print(torch.Tensor.cpu(diff).detach().numpy())
-        return x_re.view(bs, class_num, *x.size()[1:])
+        rec_x_all = x_re.view(bs, class_num, *x.size()[1:])
+        if img_index != None:
+            if img_index < 50:
+                for i in range(rec_x_all.shape[1]):
+                    temp = rec_x_all[0][i]
+                    temp = torch.Tensor.cpu(temp).detach().numpy()
+                    temp = temp.transpose(1, 2, 0)
+                    temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+                    # temp = temp * 0.3081 + 0.1307
+                    # temp = np.reshape(temp, (32, 32))
+                    temp = temp * 255
+                    temp = temp.astype(np.uint8)
+                    img = Image.fromarray(temp)
+                    img.save(os.path.join(save_folder, "{}_{}.jpeg".format(img_index, range(self._num_classes)[i])))
+        return rec_x_all
 
     def rec_loss_cf(self, feature_y_mean, val_loader, test_loader, args):
         rec_loss_cf_all = []
