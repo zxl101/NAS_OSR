@@ -281,7 +281,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     # pick_loader = DataLoader(pick_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
-    config.niters_per_epoch = min(len(train_dataset) // config.batch_size, 100)
+    config.niters_per_epoch = min(len(train_dataset) // config.batch_size, 1000)
 
     # Model #######################################
 
@@ -503,9 +503,13 @@ def train(train_loader, model, optimizer, logger, epoch):
         cor_tar = target[(outlabel == target)]
         # cor_fea = y_latent_mu
         # cor_tar = target
+        pred_label = torch.Tensor.cpu(outlabel).detach().numpy()
         cor_fea = torch.Tensor.cpu(cor_fea).detach().numpy()
         cor_tar = torch.Tensor.cpu(cor_tar).detach().numpy()
         rec_loss = torch.Tensor.cpu(rec_loss).detach().numpy()
+        with open('%s/train_pre.txt' % config.save, 'ab') as f:
+            np.savetxt(f, pred_label, fmt='%f', delimiter=' ', newline='\r')
+            f.write(b'\n')
         with open('%s/train_fea.txt' % config.save, 'ab') as f:
             np.savetxt(f, cor_fea, fmt='%f', delimiter=' ', newline='\r')
             f.write(b'\n')

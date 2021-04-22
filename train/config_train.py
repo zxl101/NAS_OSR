@@ -52,7 +52,7 @@ C.weight_decay = 5e-4 # SGD weight decay
 C.nepochs = 300 # how many epochs to train
 C.num_workers = 6 # workers for dataloader
 # C.train_scale_array = [0.75, 1, 1.25] # scale factors for augmentation during training
-C.layers = 3 # layers (cells) for network
+C.layers = 6 # layers (cells) for network
 
 """ Train Config """
 C.mode = "teacher" # "teacher" or "student"

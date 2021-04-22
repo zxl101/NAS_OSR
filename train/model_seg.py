@@ -516,7 +516,7 @@ class Network_Multi_Path_Infer(nn.Module):
         yh = self.one_hot32(y_de)
         return yh
 
-    def contrastive_loss(self, x, latent_mu, out, target, rec_x, img_index=None):
+    def contrastive_loss(self, x, latent_mu, out, target, rec_x, img_index=None, save_folder="cf_img"):
         """
         z : batchsize * 10
         """
@@ -566,7 +566,7 @@ class Network_Multi_Path_Infer(nn.Module):
                     temp = temp * 255
                     temp = temp.astype(np.uint8)
                     img = Image.fromarray(temp)
-                    img.save(os.path.join("cf_img", "{}_{}.jpeg".format(img_index, range(self._num_classes)[i])))
+                    img.save(os.path.join(save_folder, "{}_{}.jpeg".format(img_index, range(self._num_classes)[i])))
         # print(yh)
         return contrastive_loss_euclidean, yh
 
@@ -628,6 +628,7 @@ class Network_Multi_Path_Infer(nn.Module):
     def rec_loss_cf(self, feature_y_mean, val_loader, test_loader, args):
         rec_loss_cf_all = []
         class_num = feature_y_mean.size(0)
+
         for data_test, target_test in val_loader:
             if args.cuda:
                 data_test, target_test = data_test.cuda(), target_test.cuda()
@@ -642,7 +643,7 @@ class Network_Multi_Path_Infer(nn.Module):
             rec_loss_cf = rec_loss.min(1)[0]
             rec_loss_cf_all.append(rec_loss_cf)
 
-
+        args.img_index = 0
         for data_test, target_test in test_loader:
 
             if args.cuda:
@@ -652,11 +653,12 @@ class Network_Multi_Path_Infer(nn.Module):
 
             _, latent_mu, _, _, _, _, outputs = self.forward(data_test)
 
-            re_test = self.generate_cf(data_test, latent_mu, outputs, feature_y_mean)
+            re_test = self.generate_cf(data_test, latent_mu, outputs, feature_y_mean, args.img_index, "unknown_cf")
             data_test_cf = data_test.unsqueeze(1).repeat_interleave(class_num, dim=1)
             rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
             rec_loss_cf = rec_loss.min(1)[0]
             rec_loss_cf_all.append(rec_loss_cf)
+            args.img_index += 1
 
         rec_loss_cf_all = torch.cat(rec_loss_cf_all, 0)
         return rec_loss_cf_all
