@@ -538,7 +538,7 @@ class Network_Multi_Path_Infer(nn.Module):
 
         x_expand = x.unsqueeze(1).repeat_interleave(self._num_classes, dim=1)
         neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4)) * self.temperature  # N*(K+1)
-        neg_dist[:, target] = neg_dist[:, target] - 0.005 * self.temperature
+        # neg_dist[:, target] = neg_dist[:, target] - 0.005 * self.temperature
         contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, target)
 
         if img_index != None:
@@ -665,15 +665,35 @@ class Network_Multi_Path_Infer(nn.Module):
             with torch.no_grad():
                 data_test, target_test = Variable(data_test), Variable(target_test)
 
-            _, latent_mu, _, _, _, _, outputs = self.forward(data_test)
+            _, latent_mu, _, _, _, reconstructed, outputs = self.forward(data_test)
 
             re_test = self.generate_cf(data_test, latent_mu, outputs, feature_y_mean, args.img_index, "unknown_cf")
             data_test_cf = data_test.unsqueeze(1).repeat_interleave(class_num, dim=1)
             rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
             rec_loss_cf = rec_loss.min(1)[0]
             rec_loss_cf_all.append(rec_loss_cf)
-            args.img_index += 1
 
+            if args.img_index < 50:
+                re = torch.Tensor.cpu(reconstructed[0]).detach().numpy()
+                ori = torch.Tensor.cpu(data_test[0]).detach().numpy()
+                temp = re
+                temp = temp.transpose(1, 2, 0)
+                temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+                # temp = temp * 0.3081 + 0.1307
+                temp = temp * 255
+                temp = temp.astype(np.uint8)
+                img = Image.fromarray(temp)
+                img.save(os.path.join("unknown_cf", "{}_re.jpeg".format(args.img_index)))
+
+                ori = ori
+                ori = ori.transpose(1, 2, 0)
+                ori = ori * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+                # ori = ori * 0.3081 + 0.1307
+                ori = ori * 255
+                ori = ori.astype(np.uint8)
+                ori = Image.fromarray(ori)
+                ori.save(os.path.join("unknown_cf", "{}_ori.jpeg".format(args.img_index)))
+                args.img_index += 1
         rec_loss_cf_all = torch.cat(rec_loss_cf_all, 0)
         return rec_loss_cf_all
 

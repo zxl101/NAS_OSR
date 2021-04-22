@@ -61,7 +61,7 @@ def sample_gaussian(m, v):
 # from torchviz import make_dot
 # from torchsummary import summary
 
-reconstruction_function = nn.L1Loss()
+reconstruction_function = nn.MSELoss()
 reconstruction_function.reduction = 'mean'
 nllloss = nn.NLLLoss(reduction='mean')
 
@@ -469,9 +469,9 @@ def train(train_loader, model, optimizer, logger, epoch):
         optimizer.step()
 
         if img_index < 10:
-            re = torch.Tensor.cpu(reconstructed).detach().numpy()
-            ori = torch.Tensor.cpu(imgs).detach().numpy()
-            temp = re[0]
+            re = torch.Tensor.cpu(reconstructed[0]).detach().numpy()
+            ori = torch.Tensor.cpu(imgs[0]).detach().numpy()
+            temp = re
             temp = temp.transpose(1, 2, 0)
             temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
             # temp = temp * 0.3081 + 0.1307
@@ -480,7 +480,7 @@ def train(train_loader, model, optimizer, logger, epoch):
             img = Image.fromarray(temp)
             img.save(os.path.join("cf_img", "{}_re.jpeg".format(img_index)))
 
-            ori = ori[0]
+            ori = ori
             ori = ori.transpose(1, 2, 0)
             ori = ori * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
             # ori = ori * 0.3081 + 0.1307
