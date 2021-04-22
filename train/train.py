@@ -248,6 +248,7 @@ def main():
     config.num_classes = args.num_classes
     config.in_channel = in_channel
     config.img_size = 32
+    config.dataset = args.dataset
     if args.dataset == "TinyImageNet":
         config.img_size = 64
 
@@ -428,6 +429,7 @@ def train(train_loader, model, optimizer, logger, epoch):
         minibatch = dataloader.next()
         imgs = minibatch[0]
         target = minibatch[1]
+        # print(target)
         imgs = imgs.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         imgs, target = Variable(imgs), Variable(target)
@@ -499,6 +501,8 @@ def train(train_loader, model, optimizer, logger, epoch):
 
         cor_fea = y_latent_mu[(outlabel == target)]
         cor_tar = target[(outlabel == target)]
+        # cor_fea = y_latent_mu
+        # cor_tar = target
         cor_fea = torch.Tensor.cpu(cor_fea).detach().numpy()
         cor_tar = torch.Tensor.cpu(cor_tar).detach().numpy()
         rec_loss = torch.Tensor.cpu(rec_loss).detach().numpy()
@@ -650,7 +654,7 @@ def test(model, train_loader, val_loader, test_loader, epoch=0, logger=None, val
             l_test.write(b'\n')
 
     perf = ocr_test(config, model, train_loader, val_loader, test_loader)
-    if val:
+    if val and perf[-1] != 0:
         f1_matrix = np.loadtxt(config.save + '/performance.txt')
         precision = f1_matrix[-1][3]
         recall = f1_matrix[-1][4]

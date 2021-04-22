@@ -63,7 +63,7 @@ class GAU(object):
 
         self.labelset = set(self.traintar)
         self.labelnum = len(self.labelset)
-        self.num,self.dim = np.shape(self.trainfea)
+        self.num, self.dim = np.shape(self.trainfea)
         self.gau = self.train()
 
     def train(self):
@@ -94,6 +94,7 @@ class GAU(object):
         return gau
 
     def test(self, testsetlist, args):
+
 
         threshold = args.threshold
 
@@ -264,6 +265,9 @@ def ocr_test(args, lvae, train_loader, val_loader, test_loader):
         else:
             gau = GAU(args)
 
+    if gau.labelnum != args.num_classes:
+        print("Some classes do not have any correct features. Skipping this one")
+        return [0, 0, 0]
 
     test_sample = ['%s/test_fea.txt' % args.save, '%s/test_tar.txt' % args.save,
            '%s/test_pre_after.txt' % args.save]
