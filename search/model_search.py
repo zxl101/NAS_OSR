@@ -769,7 +769,6 @@ class Network_Multi_Path(nn.Module):
         yh_size = class_yh.size(1)
 
         neg_class_num = self._num_classes - 1
-        # z_neg = z.unsqueeze(1).repeat(1, neg_class_num, 1)
         y_neg = torch.zeros((bs, neg_class_num, yh_size)).cuda()
         for i in range(bs):
             y_sample = [idx for idx in range(self._num_classes) if idx != torch.argmax(target[i])]
@@ -781,7 +780,7 @@ class Network_Multi_Path(nn.Module):
         # print(rec_x_neg.shape)
         rec_x_all = torch.cat([rec_x.unsqueeze(1), rec_x_neg], dim=1)
 
-        x_expand = x.unsqueeze(1).repeat(1, self._num_classes, 1, 1, 1)
+        x_expand = x.unsqueeze(1).repeat_interleave(self._num_classes, dim=1)
         neg_dist = -((x_expand - rec_x_all) ** 2).mean((2, 3, 4)) * self.temperature  # N*(K+1)
         label = torch.zeros(bs).cuda().long()
         contrastive_loss_euclidean = nn.CrossEntropyLoss()(neg_dist, label)
@@ -801,9 +800,9 @@ class Network_Multi_Path(nn.Module):
 
         z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
 
-        z_latent_mu = z_latent_mu.unsqueeze(1).repeat(1, class_num, 1)
+        z_latent_mu = z_latent_mu.unsqueeze(1).repeat_interleave(class_num, dim=1)
         if mean_y.dim() == 2:
-            y_mu =mean_y.unsqueeze(0).repeat(bs, 1, 1)
+            y_mu =mean_y.unsqueeze(0).repeat_interleave(bs, dim=0)
         elif mean_y.dim() == 3:
             y_mu = mean_y
         latent_zy = torch.cat([z_latent_mu, y_mu], dim=2).view(bs*class_num, latent_mu.size(1))
@@ -841,7 +840,7 @@ class Network_Multi_Path(nn.Module):
             _, latent_mu, _, _, _, _, _, outputs = self._forward(data_test, target_test_en)
 
             re_test = self.generate_cf(data_test, latent_mu, outputs, target_test_en, feature_y_mean)
-            data_test_cf = data_test.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
+            data_test_cf = data_test.unsqueeze(1).repeat_interleave(class_num, dim=1)
             rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
             rec_loss_cf = rec_loss.min(1)[0]
             rec_loss_cf_all.append(rec_loss_cf)
@@ -859,7 +858,7 @@ class Network_Multi_Path(nn.Module):
             _, latent_mu, _, _, _, _, _, outputs = self._forward(data_test, target_test_en)
 
             re_test = self.generate_cf(data_test, latent_mu, outputs, target_test_en, feature_y_mean)
-            data_test_cf = data_test.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
+            data_test_cf = data_test.unsqueeze(1).repeat_interleave(class_num, dim=1)
             rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
             rec_loss_cf = rec_loss.min(1)[0]
             rec_loss_cf_all.append(rec_loss_cf)
@@ -883,7 +882,7 @@ class Network_Multi_Path(nn.Module):
             _, latent_mu, _, _, _, _, _, outputs = self._forward(data_train, target_train_en)
 
             re_train = self.generate_cf(data_train, latent_mu, outputs, target_train_en, feature_y_mean)
-            data_train_cf = data_train.unsqueeze(1).repeat(1, class_num, 1, 1, 1)
+            data_train_cf = data_train.unsqueeze(1).repeat_interleave(class_num, dim=1)
             rec_loss = (re_train - data_train_cf).pow(2).sum((2, 3, 4))
             rec_loss_cf = rec_loss.min(1)[0]
             rec_loss_cf_all.append(rec_loss_cf)
