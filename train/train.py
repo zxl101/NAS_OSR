@@ -23,6 +23,7 @@ if config.is_eval:
     config.save = 'eval-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
 else:
     config.save = 'train-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"), random.randint(1000,9999))
+
 from dataloader import MNIST_Dataset, CIFAR10_Dataset, SVHN_Dataset, CIFARAdd10_Dataset, CIFARAdd50_Dataset, CIFARAddN_Dataset, CIFAR100_Dataset, TinyImageNet_Dataset
 
 
@@ -249,11 +250,12 @@ def main():
     config.in_channel = in_channel
     config.img_size = 32
     config.dataset = args.dataset
+    config.save = config.dataset
     if args.dataset == "TinyImageNet":
         config.img_size = 64
 
-
-    create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
+    if not os.path.exists(config.save):
+        create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
 
     log_format = '%(asctime)s %(message)s'

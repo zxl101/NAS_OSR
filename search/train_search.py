@@ -148,12 +148,14 @@ def main(pretrain=True):
         config.img_size = 64
 
     # pretrain
-    config.save = "pretrain-%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d"%(config.image_height, config.image_width,
-                                                                  config.Fch, config.layers, config.batch_size,
-                                                                  config.lamda,config.beta,config.beta_z,config.lr)
-
-    config.save = 'search-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
-    create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
+    # config.save = "pretrain-%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d"%(config.image_height, config.image_width,
+    #                                                               config.Fch, config.layers, config.batch_size,
+    #                                                               config.lamda,config.beta,config.beta_z,config.lr)
+    #
+    # config.save = 'search-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
+    config.save = os.path.join(config.dataset, "pretrain")
+    if not os.path.exists(config.save):
+        create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
 
     log_format = '%(asctime)s %(message)s'
@@ -244,11 +246,13 @@ def main(pretrain=True):
             pretrained_dict = {k: v for k, v in partial.items() if k in state and state[k].size() == partial[k].size()}
             state.update(pretrained_dict)
             model.load_state_dict(state)
-            config.save = "%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d" % (config.image_height, config.image_width,
-                                                                   config.Fch, config.layers, config.batch_size,
-                                                                   config.lamda, config.beta, config.beta_z, config.lr)
-            config.save = 'search-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
-            create_exp_dir(config.save, scripts_to_save=glob.glob('*.py') + glob.glob('*.sh'))
+            # config.save = "%dx%d_F%d.L%d_batch%d_%d_%d_%d_lr%d" % (config.image_height, config.image_width,
+            #                                                        config.Fch, config.layers, config.batch_size,
+            #                                                        config.lamda, config.beta, config.beta_z, config.lr)
+            # config.save = 'search-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
+            config.save = os.path.join(config.save, "search")
+            if not os.path.exists(config.save):
+                create_exp_dir(config.save, scripts_to_save=glob.glob('*.py') + glob.glob('*.sh'))
             logger = SummaryWriter(config.save)
 
             log_format = '%(asctime)s %(message)s'
