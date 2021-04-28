@@ -254,8 +254,8 @@ def main():
     if args.dataset == "TinyImageNet":
         config.img_size = 64
 
-    if not os.path.exists(config.save):
-        create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
+    # if not os.path.exists(config.save):
+    create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
 
     log_format = '%(asctime)s %(message)s'

@@ -144,6 +144,7 @@ def main(pretrain=True):
     config.num_classes = args.num_classes
     config.in_channel = in_channel
     config.img_size = 32
+    config.dataset = args.dataset
     if args.dataset == "TinyImageNet":
         config.img_size = 64
 
@@ -154,8 +155,8 @@ def main(pretrain=True):
     #
     # config.save = 'search-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
     config.save = os.path.join(config.dataset, "pretrain")
-    if not os.path.exists(config.save):
-        create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
+    # if not os.path.exists(config.save):
+    create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
 
     log_format = '%(asctime)s %(message)s'
@@ -251,8 +252,8 @@ def main(pretrain=True):
             #                                                        config.lamda, config.beta, config.beta_z, config.lr)
             # config.save = 'search-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
             config.save = os.path.join(config.save, "search")
-            if not os.path.exists(config.save):
-                create_exp_dir(config.save, scripts_to_save=glob.glob('*.py') + glob.glob('*.sh'))
+            # if not os.path.exists(config.save):
+            create_exp_dir(config.save, scripts_to_save=glob.glob('*.py') + glob.glob('*.sh'))
             logger = SummaryWriter(config.save)
 
             log_format = '%(asctime)s %(message)s'
