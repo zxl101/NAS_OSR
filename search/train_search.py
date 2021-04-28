@@ -251,7 +251,7 @@ def main(pretrain=True):
             #                                                        config.Fch, config.layers, config.batch_size,
             #                                                        config.lamda, config.beta, config.beta_z, config.lr)
             # config.save = 'search-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
-            config.save = os.path.join(config.save, "search")
+            config.save = config.save.replace("pretrain", "search")
             # if not os.path.exists(config.save):
             create_exp_dir(config.save, scripts_to_save=glob.glob('*.py') + glob.glob('*.sh'))
             logger = SummaryWriter(config.save)

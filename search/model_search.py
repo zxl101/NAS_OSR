@@ -493,8 +493,8 @@ class Network_Multi_Path(nn.Module):
         # print(latent_mu.shape)
         z_mu, y_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
         z_var, y_var = torch.split(latent_var, [self.z_dim, self.latent_dim32], dim=1)
-        z_var = F.softplus(z_var) + 1e-8
-        y_var = F.softplus(y_var) + 1e-8
+        # z_var = F.softplus(z_var) + 1e-8
+        # y_var = F.softplus(y_var) + 1e-8
 
         y_latent = sample_gaussian(y_mu, y_var)
         latent = sample_gaussian(latent_mu, latent_var)
