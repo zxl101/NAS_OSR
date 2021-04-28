@@ -222,7 +222,7 @@ def ocr_test(args, lvae, train_loader, val_loader, test_loader):
 
                 _, mu, _, _, output, x_re, _ = lvae(data)
 
-                z_mu, y_mu = torch.split(mu, [10, 32], dim=1)
+                z_mu, y_mu = torch.split(mu, [args.z_dim, args.latent_dim32], dim=1)
                 train_rec_loss = (x_re - data).pow(2).sum((3, 2, 1))
                 outlabel = output.data.max(1)[1]  # get the index of the max log-probability
                 train_fea = y_mu[(outlabel == target)]
