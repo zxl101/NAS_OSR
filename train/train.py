@@ -5,7 +5,7 @@ import time
 import glob
 import logging
 from tqdm import tqdm
-
+from datetime import date
 import torch
 import torch.nn as nn
 import torch.utils
@@ -253,7 +253,7 @@ def main():
     config.save = config.dataset
     if args.dataset == "TinyImageNet":
         config.img_size = 64
-
+    config.save = os.path.join(config.save, date.today())
     # if not os.path.exists(config.save):
     create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
@@ -422,7 +422,8 @@ def train(train_loader, model, optimizer, logger, epoch):
     open('%s/train_tar.txt' % config.save, 'w').close()
     open('%s/train_pre.txt' % config.save, 'w').close()
     open('%s/train_rec.txt' % config.save, 'w').close()
-
+    if epoch == 40:
+        config.lamda = config.lamda / 2
     img_index = 1
     for step in pbar:
 
