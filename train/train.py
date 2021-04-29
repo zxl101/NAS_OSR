@@ -5,7 +5,7 @@ import time
 import glob
 import logging
 from tqdm import tqdm
-from datetime import date
+from datetime import datetime
 import torch
 import torch.nn as nn
 import torch.utils
@@ -253,7 +253,7 @@ def main():
     config.save = config.dataset
     if args.dataset == "TinyImageNet":
         config.img_size = 64
-    config.save = os.path.join(config.save, date.today())
+    config.save = os.path.join(config.save, datetime.now().strftime("%d_%m_%Y%H_%M_%S"))
     # if not os.path.exists(config.save):
     create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
     logger = SummaryWriter(config.save)
@@ -301,7 +301,7 @@ def main():
             [state["ratio_%d_0"%arch_idx].detach(), state["ratio_%d_1"%arch_idx].detach(), state["ratio_%d_2"%arch_idx].detach()],
             num_classes=config.num_classes, layers=config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list,
             stem_head_width=config.stem_head_width[idx], in_channel=config.in_channel, z_dim=config.z_dim, temperature=config.temperature, img_size=config.img_size,
-            skip_connect=config.skip_connect)
+            skip_connect=config.skip_connect, latent_dim32=config.latent_dim32)
 
         last = [2]
         lasts.append(last)
@@ -361,6 +361,7 @@ def main():
         best_f1 = 0
         tbar = tqdm(range(config.nepochs), ncols=80)
         optimizer = sgd_optimizer
+        val_per_epoch = 5
         for epoch in tbar:
             config.beta = next(config.beta_scheduler)
             print("The value of beta in current epoch is {}".format(config.beta))
@@ -377,7 +378,9 @@ def main():
             adjust_learning_rate(base_lr, 0.992, optimizer, epoch+1, config.nepochs)
 
             # validation
-            if not config.is_test and (epoch % 5 == 0 or epoch == 0):
+            if epoch == 40:
+                val_per_epoch = 1
+            if not config.is_test and (epoch % val_per_epoch == 0 or epoch == 0):
                 tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
                 with torch.no_grad():
                     f1_score = test(model, train_loader, val_loader, test_loader, epoch, logger, True)
@@ -422,8 +425,8 @@ def train(train_loader, model, optimizer, logger, epoch):
     open('%s/train_tar.txt' % config.save, 'w').close()
     open('%s/train_pre.txt' % config.save, 'w').close()
     open('%s/train_rec.txt' % config.save, 'w').close()
-    if epoch == 40:
-        config.lamda = config.lamda / 2
+    if epoch >= 40:
+        config.lamda = config.lamda * 0.9
     img_index = 1
     for step in pbar:
 

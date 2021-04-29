@@ -269,7 +269,7 @@ class Network_Multi_Path_Infer(nn.Module):
     def __init__(self, alphas, betas, ratios, num_classes=6, in_channel=3, layers=6,
                  criterion=nn.CrossEntropyLoss(ignore_index=-1),
                  Fch=16, width_mult_list=[1., ], stem_head_width=(1., 1.), latent_dim32=32*1,
-                 latent_dim64=64*1, latent_dim128=128*1, temperature=1, z_dim=10, img_size=64, down_scale_last=4,
+                 temperature=1, z_dim=10, img_size=64, down_scale_last=4,
                  skip_connect=1, wcontras=1):
         super(Network_Multi_Path_Infer, self).__init__()
         self._num_classes = num_classes
@@ -279,8 +279,6 @@ class Network_Multi_Path_Infer(nn.Module):
         self._Fch = Fch
         self.in_channel = in_channel
         self.latent_dim32 = latent_dim32
-        self.latent_dim64 = latent_dim64
-        self.latent_dim128 = latent_dim128
         self.temperature = temperature
         self.z_dim = z_dim
         self.img_size = img_size
