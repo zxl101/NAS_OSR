@@ -302,11 +302,11 @@ class Network_Multi_Path(nn.Module):
             elif l < layers - 1:
                 cells.append(Cell(self.num_filters(16), width_mult_list=width_mult_list, latent_dim=128, flat_dim=4))
                 cells.append(Cell(self.num_filters(32), width_mult_list=width_mult_list, latent_dim=64, flat_dim=2))
-                cells.append(Cell(self.num_filters(64), down=False, width_mult_list=width_mult_list, latent_dim=32, flat_dim=1))
+                cells.append(Cell(self.num_filters(64), down=False, width_mult_list=width_mult_list, latent_dim=self.latent_dim32, flat_dim=1))
             else:
                 cells.append(Cell(self.num_filters(16), down=False, width_mult_list=width_mult_list, latent_dim=128, flat_dim=4))
                 cells.append(Cell(self.num_filters(32), down=False, width_mult_list=width_mult_list, latent_dim=64, flat_dim=2))
-                cells.append(Cell(self.num_filters(64), down=False, width_mult_list=width_mult_list, latent_dim=32, flat_dim=1))
+                cells.append(Cell(self.num_filters(64), down=False, width_mult_list=width_mult_list, latent_dim=self.latent_dim32, flat_dim=1))
             self.cells.append(cells)
 
 

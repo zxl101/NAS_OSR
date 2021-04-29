@@ -244,7 +244,7 @@ def main():
         in_channel = 3
     elif args.dataset == "TinyImageNet":
         load_dataset = TinyImageNet_Dataset()
-        args.num_classes = 100
+        args.num_classes = 70
         in_channel = 3
     config.num_classes = args.num_classes
     config.in_channel = in_channel
@@ -283,7 +283,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     # pick_loader = DataLoader(pick_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
-    config.niters_per_epoch = min(len(train_dataset) // config.batch_size, 1000)
+    config.niters_per_epoch = len(train_dataset) // config.batch_size
 
     # Model #######################################
 
