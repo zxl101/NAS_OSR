@@ -244,7 +244,7 @@ def ocr_test(args, lvae, train_loader, val_loader, test_loader):
                     feature_y_mean = lvae.module.get_yh(target_en.cuda())
                 else:
                     feature_y_mean = get_mean_y(train_fea, train_tar, args)
-                    feature_y_mean = torch.cat(feature_y_mean, dim=0).view(args.num_classes, 32)
+                    feature_y_mean = torch.cat(feature_y_mean, dim=0).view(args.num_classes, args.latent_dim32)
 
                 if args.cf_threshold:
                     rec_loss_cf_train = lvae.module.rec_loss_cf_train(feature_y_mean, train_loader, args)
