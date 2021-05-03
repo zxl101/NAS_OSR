@@ -265,8 +265,12 @@ def ocr_test(args, lvae, train_loader, val_loader, test_loader):
         else:
             gau = GAU(args)
 
-    if gau.labelnum != args.num_classes:
-        print("Some classes do not have any correct features. Skipping this one")
+    # if gau.labelnum != args.num_classes:
+    #     print("Some classes do not have any correct features. Skipping this one")
+    #     return [0, 0, 0]
+    label_count = [gau.traintar.count(x) for x in set(gau.traintar)]
+    if 0 in label_count or 1 in label_count:
+        print("Some classes do not have enough correct features. Skipping this one")
         return [0, 0, 0]
 
     test_sample = ['%s/test_fea.txt' % args.save, '%s/test_tar.txt' % args.save,

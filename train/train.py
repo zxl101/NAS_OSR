@@ -425,8 +425,8 @@ def train(train_loader, model, optimizer, logger, epoch):
     open('%s/train_tar.txt' % config.save, 'w').close()
     open('%s/train_pre.txt' % config.save, 'w').close()
     open('%s/train_rec.txt' % config.save, 'w').close()
-    if epoch >= 40:
-        config.lamda = config.lamda * 0.9
+    # if epoch >= 40:
+    #     config.lamda = config.lamda * 0.9
     img_index = 1
     for step in pbar:
 

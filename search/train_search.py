@@ -65,6 +65,8 @@ parser.add_argument('--pretrain_metric', type=str, default='f1_score')
 parser.add_argument('--search_metric', type=str, default='f1_score')
 parser.add_argument('--unseen_num', type=int, default=None)
 parser.add_argument('--skip_connect', type=float, default=1, help='use skip connection')
+parser.add_argument('--z_dim', type=int, default=10)
+parser.add_argument('--latent_dim32', type=int, default=32)
 args = parser.parse_args()
 
 def cycle(iterable):
@@ -108,6 +110,8 @@ def main(pretrain=True):
     config.pretrain_metric = args.pretrain_metric
     config.search_metric = args.search_metric
     config.skip_connect = args.skip_connect
+    config.z_dim = args.z_dim
+    config.latent_dim32 = args.latent_dim32
 
     if args.dataset == "MNIST":
         load_dataset = MNIST_Dataset()
@@ -139,7 +143,7 @@ def main(pretrain=True):
         in_channel = 3
     elif args.dataset == "TinyImageNet":
         load_dataset = TinyImageNet_Dataset()
-        args.num_classes = 70
+        args.num_classes = 30
         in_channel = 3
     config.num_classes = args.num_classes
     config.in_channel = in_channel
@@ -176,7 +180,7 @@ def main(pretrain=True):
     model = Network(config.num_classes, config.in_channel, config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list,
                     prun_modes=config.prun_modes, stem_head_width=config.stem_head_width, z_dim=config.z_dim,
                     lamda=config.lamda, beta=config.beta, beta_z=config.beta_z, temperature=config.temperature,
-                    img_size=config.img_size, skip_connect=config.skip_connect)
+                    img_size=config.img_size, skip_connect=config.skip_connect, latent_dim32=config.latent_dim32)
 
     use_cuda = torch.cuda.is_available() and True
     device = torch.device("cuda" if use_cuda else "cpu")

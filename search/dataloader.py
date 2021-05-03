@@ -409,9 +409,9 @@ class TinyImageNet_Dataset(Dataset):
     def sampler_search(self, seed, args):
         if seed is not None:
             random.seed(seed)
-        seen_classes = random.sample(range(0, 200), 70)
+        seen_classes = random.sample(range(0, 200), 30)
         unseen_classes = [idx for idx in range(200) if idx not in seen_classes]
-        val_classes = random.sample(unseen_classes, 30)
+        val_classes = random.sample(unseen_classes, 70)
         unseen_classes = [idx for idx in unseen_classes if idx not in val_classes]
         # unseen_classes = [idx for idx in range(10) if idx not in seen_classes]
 
@@ -424,9 +424,9 @@ class TinyImageNet_Dataset(Dataset):
     def sampler_train(self, seed, args):
         if seed is not None:
             random.seed(seed)
-        seen_classes = random.sample(range(0, 200), 70)
+        seen_classes = random.sample(range(0, 200), 30)
         unseen_classes = [idx for idx in range(200) if idx not in seen_classes]
-        val_classes = random.sample(unseen_classes, 30)
+        val_classes = random.sample(unseen_classes, 70)
         unseen_classes = [idx for idx in unseen_classes if idx not in val_classes]
         seen_classes = seen_classes + val_classes
 
