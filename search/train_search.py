@@ -160,18 +160,19 @@ def main(pretrain=True):
     # config.save = 'search-{}-{}-{}'.format(config.save, time.strftime("%Y%m%d-%H%M%S"),random.randint(1000,9999))
     config.save = os.path.join(config.dataset, "pretrain")
     # if not os.path.exists(config.save):
-    create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
-    logger = SummaryWriter(config.save)
+    if config.pretrain_nepochs != 0:
+        create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
+        logger = SummaryWriter(config.save)
 
-    log_format = '%(asctime)s %(message)s'
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO, format=log_format, datefmt='%m/%d %I:%M:%S %p')
-    fh = logging.FileHandler(os.path.join(config.save, 'log.txt'))
-    fh.setFormatter(logging.Formatter(log_format))
-    logging.getLogger().addHandler(fh)
+        log_format = '%(asctime)s %(message)s'
+        logging.basicConfig(stream=sys.stdout, level=logging.INFO, format=log_format, datefmt='%m/%d %I:%M:%S %p')
+        fh = logging.FileHandler(os.path.join(config.save, 'log.txt'))
+        fh.setFormatter(logging.Formatter(log_format))
+        logging.getLogger().addHandler(fh)
 
-    assert type(pretrain) == bool or type(pretrain) == str
-    update_arch = False
-    logging.info("args = %s", str(config))
+        assert type(pretrain) == bool or type(pretrain) == str
+        update_arch = False
+        logging.info("args = %s", str(config))
     # preparation ################
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True

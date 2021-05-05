@@ -35,6 +35,7 @@ from torch.utils.data import DataLoader
 from qmv import ocr_test
 from PIL import Image
 import argparse
+import shutil
 
 class DeterministicWarmup(object):
     def __init__(self, n=100, t_max=1):
@@ -345,6 +346,7 @@ def main():
     print(config.is_eval)
     if config.is_eval:
         config.save = config.eval_path
+        test_train(model,train_loader,sgd_optimizer)
         print("start evaluation")
         model.eval()
         best_f1_score = 0
@@ -362,6 +364,7 @@ def main():
         tbar = tqdm(range(config.nepochs), ncols=80)
         optimizer = sgd_optimizer
         val_per_epoch = 5
+        os.mkdir(os.path.join(config.save,"best_fea"))
         for epoch in tbar:
             config.beta = next(config.beta_scheduler)
             print("The value of beta in current epoch is {}".format(config.beta))
@@ -390,7 +393,13 @@ def main():
                     if f1_score > best_f1 and config.test:
                         best_f1 = f1_score
                         best_val_epoch = epoch
-
+                        shutil.move(os.path.join(config.save, "train_fea.txt"), os.path.join(config.save, "best_fea", "train_fea.txt"))
+                        shutil.move(os.path.join(config.save, "train_tar.txt"),
+                                    os.path.join(config.save, "best_fea", "train_tar.txt"))
+                        shutil.move(os.path.join(config.save, "train_pre.txt"),
+                                    os.path.join(config.save, "best_fea", "train_pre.txt"))
+                        shutil.move(os.path.join(config.save, "train_rec.txt"),
+                                    os.path.join(config.save, "best_fea", "train_rec.txt"))
                         # save model
                         states = {}
                         states['epoch'] = epoch
@@ -536,6 +545,54 @@ def train(train_loader, model, optimizer, logger, epoch):
     torch.cuda.empty_cache()
 
     return train_acc
+
+def test_train(model, train_loader, optimizer):
+    open('%s/train_fea.txt' % config.save, 'w').close()
+    open('%s/train_tar.txt' % config.save, 'w').close()
+    open('%s/train_pre.txt' % config.save, 'w').close()
+    open('%s/train_rec.txt' % config.save, 'w').close()
+
+    model.eval()
+    bar_format = '{desc}[{elapsed}<{remaining},{rate_fmt}]'
+    pbar = tqdm(range(config.niters_per_epoch), file=sys.stdout, bar_format=bar_format, ncols=80)
+    dataloader = iter(train_loader)
+    for step in pbar:
+
+        optimizer.zero_grad()
+
+        minibatch = dataloader.next()
+        imgs = minibatch[0]
+        target = minibatch[1]
+        # print(target)
+        imgs = imgs.cuda(non_blocking=True)
+        target = target.cuda(non_blocking=True)
+        imgs, target = Variable(imgs), Variable(target)
+
+        latent, latent_mu, latent_var, predict, predict_test, reconstructed, outputs = model(imgs)
+        z_latent_mu, y_latent_mu = torch.split(latent_mu, [config.z_dim, config.latent_dim32], dim=1)
+
+        rec_loss = (reconstructed - imgs).pow(2).sum((3, 2, 1))
+
+        outlabel = predict.data.max(1)[1]  # get the index of the max log-probability
+
+        cor_fea = y_latent_mu[(outlabel == target)]
+        cor_tar = target[(outlabel == target)]
+        pred_label = torch.Tensor.cpu(outlabel).detach().numpy()
+        cor_fea = torch.Tensor.cpu(cor_fea).detach().numpy()
+        cor_tar = torch.Tensor.cpu(cor_tar).detach().numpy()
+        rec_loss = torch.Tensor.cpu(rec_loss).detach().numpy()
+        with open('%s/train_pre.txt' % config.save, 'ab') as f:
+            np.savetxt(f, pred_label, fmt='%f', delimiter=' ', newline='\r')
+            f.write(b'\n')
+        with open('%s/train_fea.txt' % config.save, 'ab') as f:
+            np.savetxt(f, cor_fea, fmt='%f', delimiter=' ', newline='\r')
+            f.write(b'\n')
+        with open('%s/train_tar.txt' % config.save, 'ab') as t:
+            np.savetxt(t, cor_tar, fmt='%d', delimiter=' ', newline='\r')
+            t.write(b'\n')
+        with open('%s/train_rec.txt' % config.save, 'ab') as m:
+            np.savetxt(m, rec_loss, fmt='%f', delimiter=' ', newline='\r')
+            m.write(b'\n')
 
 def test(model, train_loader, val_loader, test_loader, epoch=0, logger=None, val=False,  device=torch.device('cuda')):
     open('%s/test_fea.txt' % config.save, 'w').close()
