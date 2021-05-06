@@ -242,7 +242,7 @@ class Network_Multi_Path(nn.Module):
     def __init__(self, num_classes=10, in_channel=3, layers=16, criterion=nn.CrossEntropyLoss(ignore_index=-1), Fch=16,
                  width_mult_list=[1.,], prun_modes=['arch_ratio',], stem_head_width=[(1., 1.),], latent_dim32 = 32*1,
                  latent_dim64=64*1, latent_dim128=128*1, z_dim=10, temperature=1, beta=1, lamda=1, beta_z=1,
-                 total_epoch=50, img_size=32, down_scale_last=4, skip_connect=1):
+                 total_epoch=50, img_size=32, down_scale_last=4, skip_connect=1, wcontras=1):
         super(Network_Multi_Path, self).__init__()
         self._num_classes = num_classes
         assert layers >= 3
@@ -268,6 +268,7 @@ class Network_Multi_Path(nn.Module):
         self.img_size = img_size
         self.down_scale_last = down_scale_last
         self.last_size = self.img_size // (2 ** self.down_scale_last)
+        self.wcontras = wcontras
 
         self.one_hot32 = nn.Linear(self._num_classes, self.latent_dim32)
 
@@ -703,8 +704,9 @@ class Network_Multi_Path(nn.Module):
                 ce = nllloss(predict, target)
                 ce_loss += self.lamda * ce
 
-                contras = self.contrastive_loss(input, latent_mu, out, target, reconstructed)
-                contras_loss += contras
+                if self.wcontras != 0:
+                    contras = self.contrastive_loss(input, latent_mu, out, target, reconstructed)
+                    contras_loss += self.wcontras * contras
         if len(self._width_mult_list) > 1:
             self.prun_mode = "max"
             # latent_mu, latent_var, yh, predict, reconstructed, up32, up16 = self._forward(input, target, target_de)
@@ -725,8 +727,9 @@ class Network_Multi_Path(nn.Module):
             ce = nllloss(predict, target)
             ce_loss += self.lamda * ce
 
-            contras = self.contrastive_loss(input, latent_mu, out, target, reconstructed)
-            contras_loss += contras
+            if self.wcontras != 0:
+                contras = self.contrastive_loss(input, latent_mu, out, target, reconstructed)
+                contras_loss += self.wcontras * contras
 
             # if pretrain == True:
             #     self.prun_mode = "random"
@@ -750,8 +753,9 @@ class Network_Multi_Path(nn.Module):
             ce = nllloss(predict, target)
             ce_loss += self.lamda * ce
 
-            contras = self.contrastive_loss(input, latent_mu, out, target, reconstructed)
-            contras_loss += contras
+            if self.wcontras != 0:
+                contras = self.contrastive_loss(input, latent_mu, out, target, reconstructed)
+                contras_loss += self.wcontras * contras
         self.prun_mode = "max"
         # _, _, _, predict, _, _, _ = self._forward(input, target, target_de)
         _, latent_mu, _, \

@@ -89,4 +89,4 @@ if C.mode == "teacher":
 C.is_train = True
 C.is_test = False # if True, prediction files for the test set will be generated
 C.is_eval = False # if True, the train.py will only do evaluation for once
-C.eval_path = "best_model/CIFARAdd10/2021-04-28/"
+C.eval_path = "best_model/CIFARAddN/47"

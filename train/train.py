@@ -346,7 +346,7 @@ def main():
     print(config.is_eval)
     if config.is_eval:
         config.save = config.eval_path
-        test_train(model,train_loader,sgd_optimizer)
+        # test_train(model,train_loader,sgd_optimizer)
         print("start evaluation")
         model.eval()
         best_f1_score = 0

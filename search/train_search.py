@@ -51,6 +51,7 @@ parser.add_argument('--weight_decay', type=float, default=0.00005, help='weight 
 parser.add_argument('--lamda', type=float, default=None)
 parser.add_argument('--beta', type=float, default=None)
 parser.add_argument('--beta_z', type=float, default=None)
+parser.add_argument('--wcontras', type=float, default=1)
 parser.add_argument('--seed_sampler', type=int, default=777)
 parser.add_argument('--dataset', type=str, default="CIFAR10")
 parser.add_argument('--use_model', action="store_true", default=False, help='If use model to get the train feature')
@@ -112,6 +113,7 @@ def main(pretrain=True):
     config.skip_connect = args.skip_connect
     config.z_dim = args.z_dim
     config.latent_dim32 = args.latent_dim32
+    config.wcontras = args.wcontras
 
     if args.dataset == "MNIST":
         load_dataset = MNIST_Dataset()
