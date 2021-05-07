@@ -246,8 +246,9 @@ def main(pretrain=True):
     train_loader_model = DataLoader(train_dataset_model, batch_size=config.batch_size, shuffle=True, num_workers=0)
     train_loader_arch = DataLoader(train_dataset_arch, batch_size=config.batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
-    pick_loader = DataLoader(pick_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
+    if not args.cs_split:
+        pick_loader = DataLoader(pick_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
+    # test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
 
     tbar = tqdm(range(config.nepochs), ncols=80)
     best_val_loss = 10000000
