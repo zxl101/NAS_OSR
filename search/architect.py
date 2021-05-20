@@ -57,7 +57,7 @@ class Architect(object):
         return loss
 
     def _backward_step(self, input_valid, target_valid, target_de):
-        ce_loss, kl_loss, re_loss, contras_loss, _, _, _, _ = self.model(input_valid, target_valid, target_de, test=True)
+        ce_loss, kl_loss, re_loss, contras_loss, _, _, _, _ = self.model(input_valid, target_valid, target_de)
         loss_latency = 0
         self.latency_supernet = 0
         self.model.module.prun_mode = None

@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Variable
 import os
+import scipy.stats as st
 os.environ['R_HOME'] = '/home/neuron/anaconda3/envs/nas_osr/lib/R'
 from rpy2.robjects.packages import importr
 from rpy2.robjects import numpy2ri
@@ -42,7 +43,10 @@ def revise_cf(args, lvae, feature_y_mean, val_loader, test_loader, rec_loss=None
 
     rec_mean = np.mean(train_rec)
     rec_std = np.std(train_rec)
-    rec_thres = rec_mean + 2 * rec_std #95%
+    if args.re_threshold == None:
+        args.re_threshold = 2
+    rec_thres = rec_mean + args.re_threshold * rec_std
+    # rec_thres = rec_mean + 2 * rec_std #95%
 
     test_rec_cf = lvae.module.rec_loss_cf(feature_y_mean, val_loader, test_loader, args)
     test_rec_cf = test_rec_cf.cpu().numpy()
@@ -50,7 +54,7 @@ def revise_cf(args, lvae, feature_y_mean, val_loader, test_loader, rec_loss=None
     test_pre[(test_rec_cf > rec_thres)] = args.num_classes
     open('%s/test_pre_after.txt' %args.save , 'w').close()  # clear
     np.savetxt('%s/test_pre_after.txt' %args.save , test_pre, delimiter=' ', fmt='%d')
-
+    return test_rec_cf > rec_thres
 
 class GAU(object):
     def __init__(self, args, fea=None, tar=None):
@@ -109,7 +113,8 @@ class GAU(object):
         testsize = testfea.shape[0]
         result = []
         if threshold != 0:
-            print('threshold is', threshold)
+            print('threshold is', args.threshold)
+            print('Reconstruction threshold is', args.re_threshold)
 
 
         def multivariateGaussian(vector, mu, sigma):
@@ -157,36 +162,45 @@ class GAU(object):
         result = np.array(result)
         np.savetxt('%s/Result.txt' %args.save, result)
 
-        for i in range(labelnum+1):
-            locals()['resultIndex' + str(i)] = np.argwhere(result == i)
-            locals()['targetIndex' + str(i)] = np.argwhere(testtar == i)
+        if not args.auroc:
+            for i in range(labelnum+1):
+                locals()['resultIndex' + str(i)] = np.argwhere(result == i)
+                locals()['targetIndex' + str(i)] = np.argwhere(testtar == i)
 
-        for i in range(labelnum+1):
-            locals()['tp' + str(i)] = np.sum((testtar[(locals()['resultIndex' + str(i)])]) == i)
-            locals()['fp' + str(i)] = np.sum((testtar[(locals()['resultIndex' + str(i)])]) != i)
-            locals()['fn' + str(i)] = np.sum((result[locals()['targetIndex' + str(i)]]) != i)
-            # print(locals()['tp' + str(i)],locals()['fp' + str(i)],locals()['fn' + str(i)])
+            for i in range(labelnum+1):
+                locals()['tp' + str(i)] = np.sum((testtar[(locals()['resultIndex' + str(i)])]) == i)
+                locals()['fp' + str(i)] = np.sum((testtar[(locals()['resultIndex' + str(i)])]) != i)
+                locals()['fn' + str(i)] = np.sum((result[locals()['targetIndex' + str(i)]]) != i)
+                # print(locals()['tp' + str(i)],locals()['fp' + str(i)],locals()['fn' + str(i)])
 
-            performance[i, 0] = locals()['tp' + str(i)]
-            performance[i, 1] = locals()['fp' + str(i)]
-            performance[i, 2] = locals()['fn' + str(i)]
+                performance[i, 0] = locals()['tp' + str(i)]
+                performance[i, 1] = locals()['fp' + str(i)]
+                performance[i, 2] = locals()['fn' + str(i)]
 
-        for i in range(labelnum+1):
-            locals()['precision' + str(i)] = locals()['tp' + str(i)]/(locals()['tp' + str(i)]+locals()['fp' + str(i)] + 1)
-            locals()['recall' + str(i)] = locals()['tp' + str(i)]/(locals()['tp' + str(i)]+locals()['fn' + str(i)] + 1)
-            locals()['f-measure' + str(i)] = 2* locals()['precision' + str(i)]*locals()['recall' + str(i)]/(locals()['precision' + str(i)] + locals()['recall' + str(i)])
+            for i in range(labelnum+1):
+                locals()['precision' + str(i)] = locals()['tp' + str(i)]/(locals()['tp' + str(i)]+locals()['fp' + str(i)] + 1)
+                locals()['recall' + str(i)] = locals()['tp' + str(i)]/(locals()['tp' + str(i)]+locals()['fn' + str(i)] + 1)
+                locals()['f-measure' + str(i)] = 2* locals()['precision' + str(i)]*locals()['recall' + str(i)]/(locals()['precision' + str(i)] + locals()['recall' + str(i)])
 
-            performance[i, 3] = locals()['precision' + str(i)]
-            performance[i, 4] = locals()['recall' + str(i)]
+                performance[i, 3] = locals()['precision' + str(i)]
+                performance[i, 4] = locals()['recall' + str(i)]
 
-        performancesum = performance.sum(axis = 0)
-        mafmeasure = 2*performancesum[3]*performancesum[4]/(performancesum[3]+performancesum[4])
-        maperformance = np.append((performancesum)[3:],mafmeasure)/(labelnum+1)
+            performancesum = performance.sum(axis = 0)
+            mafmeasure = 2*performancesum[3]*performancesum[4]/(performancesum[3]+performancesum[4])
+            maperformance = np.append((performancesum)[3:],mafmeasure)/(labelnum+1)
 
-        print(performance)
-        np.savetxt('%s/performance.txt' %args.save , performance)
-        return maperformance
+            print(performance)
+            np.savetxt('%s/performance.txt' %args.save , performance)
+            return maperformance
 
+        else:
+            # tp = np.sum(np.logical_and(result==(labelnum), testtar==(labelnum)))
+            # fp = np.sum(np.logical_and(result==(labelnum), testtar!=(labelnum)))
+            # fn = np.sum(np.logical_and(result!=(labelnum), testtar==(labelnum)))
+            # tn = np.sum(np.logical_and(result!=(labelnum), testtar!=(labelnum)))
+            #
+            # return [tp/(tp+fn), fp/(tn+fp)]
+            return result
 
 def get_mean_y(train_feature, train_target, args):
     # label_num = int(torch.max(train_target)) + 1
@@ -299,3 +313,95 @@ def ocr_test(args, lvae, train_loader, val_loader, test_loader):
 
     return perf_test
 
+def auroc_cal(args, lvae, train_loader, val_loader, test_loader):
+    lvae.eval()
+    train_fea_all = []
+    train_tar_all = []
+    train_rec_loss_all = []
+
+    # get train feature
+    with torch.no_grad():
+        for batch_idx, (data, target) in enumerate(train_loader):
+            if args.cuda:
+                data = data.cuda()
+                target = target.cuda()
+            data, target = Variable(data), Variable(target)
+
+            _, mu, _, _, output, x_re, _ = lvae(data)
+
+            z_mu, y_mu = torch.split(mu, [args.z_dim, args.latent_dim32], dim=1)
+            train_rec_loss = (x_re - data).pow(2).sum((3, 2, 1))
+            outlabel = output.data.max(1)[1]  # get the index of the max log-probability
+            train_fea = y_mu[(outlabel == target)]
+            train_tar = target[(outlabel == target)]
+
+            train_fea_all.append(train_fea)
+            train_tar_all.append(train_tar)
+            train_rec_loss_all.append(train_rec_loss)
+
+    train_fea = torch.cat(train_fea_all, 0)
+    train_tar = torch.cat(train_tar_all, 0)
+    train_rec_loss = torch.cat(train_rec_loss_all, 0)
+    # train_fea = np.loadtxt('%s/train_fea.txt' % args.save)
+    # train_pred = np.loadtxt('%s/train_pred.txt' % args.save)
+    # train_tar = np.loadtxt('%s/train_tar.txt' % args.save)
+    # train_rec_loss = np.loadtxt('%s/train_rec.txt' % args.save)
+
+    tp_fp_list = []
+    # Rreconstruction threshold
+    with torch.no_grad():
+        if args.yh:
+            target_en = torch.eye(args.num_classes)
+            feature_y_mean = lvae.module.get_yh(target_en.cuda())
+        else:
+            feature_y_mean = get_mean_y(train_fea, train_tar, args)
+            feature_y_mean = torch.cat(feature_y_mean, dim=0).view(args.num_classes, args.latent_dim32)
+
+        if args.cf_threshold:
+            rec_loss_cf_train = lvae.module.rec_loss_cf_train(feature_y_mean, train_loader, args)
+            train_rec_loss = rec_loss_cf_train.cpu().numpy()
+        else:
+            train_rec_loss = train_rec_loss.cpu().numpy()
+
+    re_results = {}
+    for re_threshold in np.arange(2, 0, -0.5):
+        print("Calculating re threshold ", str(re_threshold))
+        args.re_threshold = re_threshold
+        results = revise_cf(args, lvae, feature_y_mean, val_loader, test_loader, rec_loss=train_rec_loss)
+        re_results[re_threshold] = results
+
+    if args.use_model_gau:
+        train_fea = train_fea.cpu().numpy()
+        train_tar = train_tar.cpu().numpy()
+        gau = GAU(args, train_fea, train_tar)
+    else:
+        gau = GAU(args)
+
+
+    #Distribution probability threshold
+    dist_results = {}
+    for threshold in np.arange(0.5, 0.95, 0.05):
+        args.threshold = threshold
+
+        test_sample = ['%s/test_fea.txt' % args.save, '%s/test_tar.txt' % args.save,
+               '%s/test_pre_after.txt' % args.save]
+        perf_test = gau.test(test_sample, args)
+        dist_results[threshold] = perf_test
+
+    # calculate tpr, fpr
+    testtar = np.loadtxt('%s/test_tar.txt' % args.save)
+    labelnum = 6
+    for key_re, value_re in re_results.items():
+        for key_dist, value_dist in dist_results.items():
+            result = (value_re | value_dist)
+
+            tp = np.sum(np.logical_and(result == (labelnum), testtar == (labelnum)))
+            fp = np.sum(np.logical_and(result==(labelnum), testtar!=(labelnum)))
+            fn = np.sum(np.logical_and(result!=(labelnum), testtar==(labelnum)))
+            tn = np.sum(np.logical_and(result!=(labelnum), testtar!=(labelnum)))
+
+            tp_fp_list.append([tp/(tp+fn), fp/(tn+fp)])
+
+    np.savetxt('%s/tpr_fpr.txt' % args.save, np.array(tp_fp_list))
+
+    return tp_fp_list

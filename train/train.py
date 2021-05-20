@@ -32,7 +32,7 @@ from utils.init_func import init_weight
 from model_seg import Network_Multi_Path_Infer as Network
 
 from torch.utils.data import DataLoader
-from qmv import ocr_test
+from qmv import ocr_test, auroc_cal
 from PIL import Image
 import argparse
 import shutil
@@ -165,6 +165,7 @@ parser.add_argument('--unseen_num', type=int, default=None)
 parser.add_argument('--load', type=str, default=None)
 parser.add_argument('--wcontras', type=float, default=1)
 parser.add_argument('--is_eval', action="store_true", default=False)
+parser.add_argument('--auroc', action='store_true', default=False)
 args = parser.parse_args()
 
 
@@ -182,6 +183,7 @@ def main():
     config.wregroup = args.wregroup
     config.test = args.test
     config.is_eval = args.is_eval
+    config.auroc = args.auroc
     if args.temperature != None:
         config.temperature = args.temperature
     if args.z_dim != None:
@@ -320,7 +322,17 @@ def main():
         logging.info("last:" + str(model.lasts))
         model = nn.DataParallel(model)
         model = model.cuda()
+        # total_param = sum(p.numel() for p in model.parameters())
+        # print("Total parameter number:")
+        # print(total_param)
+        # return None
 
+        # temp_input = torch.randn(1, 3, 32, 32)
+        # temp_input = temp_input.cuda()
+        # macs, params = profile(model, inputs=(temp_input,))
+        # print("The FLOP is:")
+        # print(macs)
+        # print(params)
 
         init_weight(model.module, nn.init.kaiming_normal_, torch.nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
 
@@ -330,7 +342,7 @@ def main():
             pretrained_dict = {k: v for k, v in partial.items() if k in state}
             state.update(pretrained_dict)
             model.load_state_dict(state)
-        elif config.is_eval:
+        elif config.is_eval or config.auroc:
             model.load_state_dict(torch.load(os.path.join(config.eval_path, "weights0.pt")))
 
         # Optimizer ###################################
@@ -343,21 +355,35 @@ def main():
         #     if param.requires_grad:
         #         print(name)
         # print("--------------------------------------------------------------------")
+
+
+
+
+
     print(config.is_eval)
-    if config.is_eval:
+    if config.auroc:
+        config.save = config.eval_path
+        # test_train(model,train_loader,sgd_optimizer)
+        print("start calculating AUROC")
+        model.eval()
+        perf = auroc_cal(config, model, train_loader, val_loader, test_loader)
+
+
+    elif config.is_eval:
         config.save = config.eval_path
         # test_train(model,train_loader,sgd_optimizer)
         print("start evaluation")
         model.eval()
         best_f1_score = 0
         best_threshold = 0.5
+        config.re_threshold = None
         for threshold in np.arange(0.5, 0.95, 0.05):
             config.threshold = threshold
             f1_score = test(model, train_loader, val_loader, test_loader, 1, logger, False)
-            print("The f1 score of threshold {} is {}".format(threshold, f1_score))
-            if f1_score > best_f1_score:
-                best_f1_score = f1_score
-                best_threshold = threshold
+        print("The f1 score of threshold {} is {}".format(threshold, f1_score))
+        if f1_score > best_f1_score:
+            best_f1_score = f1_score
+            best_threshold = threshold
         print("The best f1 score is {} at threshold {}".format(best_f1_score, best_threshold))
     elif config.is_train:
         best_f1 = 0

@@ -714,3 +714,4 @@ class Network_Multi_Path_Infer(nn.Module):
 
         rec_loss_cf_all = torch.cat(rec_loss_cf_all, 0)
         return rec_loss_cf_all
+
