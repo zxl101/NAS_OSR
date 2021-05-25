@@ -16,6 +16,7 @@ mvt = importr('mvtnorm')
 
 
 
+
 def revise(args, rec_loss=None):
 
     if not type(rec_loss).__module__ == np.__name__:
@@ -200,7 +201,7 @@ class GAU(object):
             # tn = np.sum(np.logical_and(result!=(labelnum), testtar!=(labelnum)))
             #
             # return [tp/(tp+fn), fp/(tn+fp)]
-            return result
+            return result == labelnum
 
 def get_mean_y(train_feature, train_target, args):
     # label_num = int(torch.max(train_target)) + 1
@@ -318,6 +319,7 @@ def auroc_cal(args, lvae, train_loader, val_loader, test_loader):
     train_fea_all = []
     train_tar_all = []
     train_rec_loss_all = []
+    train_prob_all = []
 
     # get train feature
     with torch.no_grad():
@@ -338,16 +340,28 @@ def auroc_cal(args, lvae, train_loader, val_loader, test_loader):
             train_fea_all.append(train_fea)
             train_tar_all.append(train_tar)
             train_rec_loss_all.append(train_rec_loss)
+            train_prob_all.append(output)
 
     train_fea = torch.cat(train_fea_all, 0)
     train_tar = torch.cat(train_tar_all, 0)
     train_rec_loss = torch.cat(train_rec_loss_all, 0)
+    train_prob = torch.cat(train_prob_all, 0)
     # train_fea = np.loadtxt('%s/train_fea.txt' % args.save)
     # train_pred = np.loadtxt('%s/train_pred.txt' % args.save)
     # train_tar = np.loadtxt('%s/train_tar.txt' % args.save)
     # train_rec_loss = np.loadtxt('%s/train_rec.txt' % args.save)
 
     tp_fp_list = []
+
+    # s_results = {}
+    # #Softmax threshold
+    # s_pred = torch.max(train_prob, dim=1)
+    # for s_threshold in np.arange(0.95,0.1,-0.05):
+    #     s_results[s_threshold] = [x <= s_threshold for x in s_pred]
+    #
+    # with open('%s/softmax_result.pkl' % args.save ,'wb') as f:
+    #     pickle.dump(s_results, f, pickle.HIGHEST_PROTOCOL)
+
     # Rreconstruction threshold
     with torch.no_grad():
         if args.yh:
@@ -363,12 +377,19 @@ def auroc_cal(args, lvae, train_loader, val_loader, test_loader):
         else:
             train_rec_loss = train_rec_loss.cpu().numpy()
 
-    re_results = {}
-    for re_threshold in np.arange(2, 0, -0.5):
-        print("Calculating re threshold ", str(re_threshold))
-        args.re_threshold = re_threshold
-        results = revise_cf(args, lvae, feature_y_mean, val_loader, test_loader, rec_loss=train_rec_loss)
-        re_results[re_threshold] = results
+        re_results = {}
+        # if os.path.exists('%s/reconstruction_result.pkl' % args.save):
+        #     re_results = pickle.load(open('%s/reconstruction_result.pkl' % args.save, 'rb'))
+        # else:
+        for re_threshold in np.arange(0.995, 0.75, -0.005):
+            print("Calculating re threshold ", str(re_threshold))
+            args.re_threshold = stats.norm.cdf(re_threshold)
+            results = revise_cf(args, lvae, feature_y_mean, val_loader, test_loader, rec_loss=train_rec_loss)
+            re_results[re_threshold] = results
+            print(results)
+
+        with open('%s/reconstruction_result.pkl' % args.save ,'wb') as f:
+            pickle.dump(re_results, f, pickle.HIGHEST_PROTOCOL)
 
     if args.use_model_gau:
         train_fea = train_fea.cpu().numpy()
@@ -384,21 +405,28 @@ def auroc_cal(args, lvae, train_loader, val_loader, test_loader):
         args.threshold = threshold
 
         test_sample = ['%s/test_fea.txt' % args.save, '%s/test_tar.txt' % args.save,
-               '%s/test_pre_after.txt' % args.save]
+               '%s/test_pre.txt' % args.save]
         perf_test = gau.test(test_sample, args)
+        perf_test = perf_test.tolist()
         dist_results[threshold] = perf_test
+        print(perf_test)
+
+    with open('%s/dist_result.pkl' % args.save ,'wb') as f:
+        pickle.dump(dist_results, f, pickle.HIGHEST_PROTOCOL)
+
 
     # calculate tpr, fpr
     testtar = np.loadtxt('%s/test_tar.txt' % args.save)
-    labelnum = 6
+    labelnum = args.num_classes
     for key_re, value_re in re_results.items():
         for key_dist, value_dist in dist_results.items():
+            # for key_s, value_s in s_results.items():
             result = (value_re | value_dist)
 
-            tp = np.sum(np.logical_and(result == (labelnum), testtar == (labelnum)))
-            fp = np.sum(np.logical_and(result==(labelnum), testtar!=(labelnum)))
-            fn = np.sum(np.logical_and(result!=(labelnum), testtar==(labelnum)))
-            tn = np.sum(np.logical_and(result!=(labelnum), testtar!=(labelnum)))
+            tp = np.sum(np.logical_and(result == True, testtar == (labelnum)))
+            fp = np.sum(np.logical_and(result== True, testtar!=(labelnum)))
+            fn = np.sum(np.logical_and(result == False, testtar==(labelnum)))
+            tn = np.sum(np.logical_and(result == False, testtar!=(labelnum)))
 
             tp_fp_list.append([tp/(tp+fn), fp/(tn+fp)])
 

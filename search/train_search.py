@@ -126,7 +126,10 @@ def main(pretrain=True):
         in_channel = 1
     elif args.dataset == "CIFAR10":
         load_dataset = CIFAR10_Dataset()
-        args.num_classes = 4
+        if args.cs_split:
+            args.num_classes = 6
+        else:
+            args.num_classes = 4
         in_channel = 3
     elif args.dataset == "SVHN":
         load_dataset = SVHN_Dataset()
@@ -188,7 +191,8 @@ def main(pretrain=True):
     model = Network(config.num_classes, config.in_channel, config.layers, Fch=config.Fch, width_mult_list=config.width_mult_list,
                     prun_modes=config.prun_modes, stem_head_width=config.stem_head_width, z_dim=config.z_dim,
                     lamda=config.lamda, beta=config.beta, beta_z=config.beta_z, temperature=config.temperature,
-                    img_size=config.img_size, skip_connect=config.skip_connect, latent_dim32=config.latent_dim32)
+                    img_size=config.img_size, skip_connect=config.skip_connect, latent_dim32=config.latent_dim32,
+                    wcontras=config.wcontras)
 
     use_cuda = torch.cuda.is_available() and True
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -667,12 +671,6 @@ def infer(epoch, model, val_loader, logger, FPS=True, config=None, device=torch.
         logger.add_scalar("val_loss/val_contras_loss", val_contras, epoch)
         logger.add_scalar("Acc_val", val_acc, epoch)
 
-
-    # if FPS:
-    #     fps0, fps1 = arch_logging(model, config, logger, epoch)
-    #     return total_ce_loss, fps0, fps1
-    # else:
-    #     return total_ce_loss, total_re_loss, total_kl_loss
     return total_ce_loss, total_re_loss, total_kl_loss, total_contras_loss
 
 

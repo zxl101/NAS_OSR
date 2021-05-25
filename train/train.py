@@ -184,6 +184,7 @@ def main():
     config.test = args.test
     config.is_eval = args.is_eval
     config.auroc = args.auroc
+    config.re_threshold = 2
     if args.temperature != None:
         config.temperature = args.temperature
     if args.z_dim != None:
@@ -306,7 +307,7 @@ def main():
             stem_head_width=config.stem_head_width[idx], in_channel=config.in_channel, z_dim=config.z_dim, temperature=config.temperature, img_size=config.img_size,
             skip_connect=config.skip_connect, latent_dim32=config.latent_dim32)
 
-        last = [2]
+        last = [0,2]
         lasts.append(last)
         model.build_structure(last)
         logging.info("net: " + str(model))
@@ -322,17 +323,20 @@ def main():
         logging.info("last:" + str(model.lasts))
         model = nn.DataParallel(model)
         model = model.cuda()
-        # total_param = sum(p.numel() for p in model.parameters())
-        # print("Total parameter number:")
-        # print(total_param)
-        # return None
+
+        total_param = sum(p.numel() for p in model.parameters())
+        print("Total parameter number:")
+        print(total_param)
 
         # temp_input = torch.randn(1, 3, 32, 32)
         # temp_input = temp_input.cuda()
+        # # print(model.module.is_cuda)
         # macs, params = profile(model, inputs=(temp_input,))
         # print("The FLOP is:")
         # print(macs)
         # print(params)
+
+        return None
 
         init_weight(model.module, nn.init.kaiming_normal_, torch.nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
 
@@ -377,14 +381,14 @@ def main():
         best_f1_score = 0
         best_threshold = 0.5
         config.re_threshold = None
-        for threshold in np.arange(0.5, 0.95, 0.05):
+        for threshold in np.arange(0.5, 0.55, 0.05):
             config.threshold = threshold
             f1_score = test(model, train_loader, val_loader, test_loader, 1, logger, False)
-        print("The f1 score of threshold {} is {}".format(threshold, f1_score))
-        if f1_score > best_f1_score:
-            best_f1_score = f1_score
-            best_threshold = threshold
-        print("The best f1 score is {} at threshold {}".format(best_f1_score, best_threshold))
+            print("The f1 score of threshold {} is {}".format(threshold, f1_score))
+            if f1_score > best_f1_score:
+                best_f1_score = f1_score
+                best_threshold = threshold
+            print("The best f1 score is {} at threshold {}".format(best_f1_score, best_threshold))
     elif config.is_train:
         best_f1 = 0
         tbar = tqdm(range(config.nepochs), ncols=80)

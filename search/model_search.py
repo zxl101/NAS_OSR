@@ -673,7 +673,7 @@ class Network_Multi_Path(nn.Module):
         return class_latent
 
 
-    def forward(self, input, target, target_de, pretrain=False, test=False):
+    def forward(self, input, target, target_de, pretrain=False):
         # print(target)
         re_loss = 0
         ce_loss = 0
@@ -767,6 +767,8 @@ class Network_Multi_Path(nn.Module):
 
         # return ce_loss, re_loss, torch.mean(kl_loss), predict
         z_latent_mu, y_latent_mu = torch.split(latent_mu, [self.z_dim, self.latent_dim32], dim=1)
+        if self.wcontras == 0:
+            contras_loss = torch.cuda.FloatTensor(ce_loss.shape).fill_(0)
         return ce_loss, torch.mean(kl_loss), re_loss, contras_loss, predict, predict_test, y_latent_mu, reconstructed
 
     def test(self, input, target, target_de, pretrain=False):
