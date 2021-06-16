@@ -307,7 +307,7 @@ def main():
             stem_head_width=config.stem_head_width[idx], in_channel=config.in_channel, z_dim=config.z_dim, temperature=config.temperature, img_size=config.img_size,
             skip_connect=config.skip_connect, latent_dim32=config.latent_dim32)
 
-        last = [0,2]
+        last = [2]
         lasts.append(last)
         model.build_structure(last)
         logging.info("net: " + str(model))
@@ -321,22 +321,26 @@ def main():
         logging.info("ops:" + str(model.ops))
         logging.info("path:" + str(model.paths))
         logging.info("last:" + str(model.lasts))
+
+        device = torch.device("cuda:0")
+
         model = nn.DataParallel(model)
-        model = model.cuda()
+        model = model.to(device)
 
-        total_param = sum(p.numel() for p in model.parameters())
-        print("Total parameter number:")
-        print(total_param)
-
-        # temp_input = torch.randn(1, 3, 32, 32)
-        # temp_input = temp_input.cuda()
+        # total_param = sum(p.numel() for p in model.parameters())
+        # print("Total parameter number:")
+        # print(total_param)
+        #
+        # temp_input = torch.randn(1, 3, 32, 32).to(device)
+        # # temp_input = temp_input.cuda()
         # # print(model.module.is_cuda)
         # macs, params = profile(model, inputs=(temp_input,))
         # print("The FLOP is:")
         # print(macs)
         # print(params)
+        #
+        # return None
 
-        return None
 
         init_weight(model.module, nn.init.kaiming_normal_, torch.nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
 
