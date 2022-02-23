@@ -62,7 +62,8 @@ if C.mode == "teacher":
     C.branch = [3] # number of output branches
     C.width_mult_list = [1.,] # selection choices for channel pruning
     C.stem_head_width = [(1, 1)] # width ratio (#channel / Fch) for [teacher, student]
-    C.load_path = "used_searched_models/4loss_os_f1/search" # path to the searched directory
+    C.load_path = "searched_CIFAR50" # path to the searched directory
+    C.load_path = "used_searched_models/4loss_os_f1/search/"
     C.load_epoch = "last" # "last" or "int" (e.g. "30"): which epoch to load from the searched architecture
     C.batch_size = 64
     # C.niters_per_epoch = min(1000, C.num_train_imgs // C.batch_size)  # how many batches per epoch
@@ -89,4 +90,4 @@ if C.mode == "teacher":
 C.is_train = True
 C.is_test = False # if True, prediction files for the test set will be generated
 C.is_eval = False # if True, the train.py will only do evaluation for once
-C.eval_path = "CIFAR10/02_06_202114_47_15"
+C.eval_path = "best_model/SVHN/"

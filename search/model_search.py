@@ -857,24 +857,25 @@ class Network_Multi_Path(nn.Module):
     def rec_loss_cf(self, feature_y_mean, val_loader, test_loader, args):
         rec_loss_cf_all = []
         class_num = feature_y_mean.size(0)
-        for data_test, target_test in val_loader:
-            target_test_en = torch.Tensor(target_test.shape[0], args.num_classes)
-            target_test_en.zero_()
-            target_test_en.scatter_(1, target_test.view(-1, 1), 1)  # one-hot encoding
-            target_test_en = target_test_en.cuda()
-            if args.cuda:
-                data_test, target_test = data_test.cuda(), target_test.cuda()
-            with torch.no_grad():
-                data_test, target_test = Variable(data_test), Variable(target_test)
+        if len(val_loader) != 0:
+            for data_test, target_test in val_loader:
+                target_test_en = torch.Tensor(target_test.shape[0], args.num_classes)
+                target_test_en.zero_()
+                target_test_en.scatter_(1, target_test.view(-1, 1), 1)  # one-hot encoding
+                target_test_en = target_test_en.cuda()
+                if args.cuda:
+                    data_test, target_test = data_test.cuda(), target_test.cuda()
+                with torch.no_grad():
+                    data_test, target_test = Variable(data_test), Variable(target_test)
 
 
-            _, latent_mu, _, _, _, _, _, outputs = self._forward(data_test, target_test_en)
+                _, latent_mu, _, _, _, _, _, outputs = self._forward(data_test, target_test_en)
 
-            re_test = self.generate_cf(data_test, latent_mu, outputs, target_test_en, feature_y_mean)
-            data_test_cf = data_test.unsqueeze(1).repeat_interleave(class_num, dim=1)
-            rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
-            rec_loss_cf = rec_loss.min(1)[0]
-            rec_loss_cf_all.append(rec_loss_cf)
+                re_test = self.generate_cf(data_test, latent_mu, outputs, target_test_en, feature_y_mean)
+                data_test_cf = data_test.unsqueeze(1).repeat_interleave(class_num, dim=1)
+                rec_loss = (re_test - data_test_cf).pow(2).sum((2, 3, 4))
+                rec_loss_cf = rec_loss.min(1)[0]
+                rec_loss_cf_all.append(rec_loss_cf)
 
         for data_test, target_test in test_loader:
             target_test_en = torch.Tensor(target_test.shape[0], args.num_classes)

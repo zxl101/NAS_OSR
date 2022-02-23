@@ -248,7 +248,7 @@ def main():
         in_channel = 3
     elif args.dataset == "TinyImageNet":
         load_dataset = TinyImageNet_Dataset()
-        args.num_classes = 70
+        args.num_classes = 20
         in_channel = 3
     config.num_classes = args.num_classes
     config.in_channel = in_channel
@@ -283,11 +283,13 @@ def main():
     seed_sampler = int(args.seed_sampler)
     # train_dataset, val_dataset, pick_dataset, test_dataset = load_dataset.sampler_search(seed_sampler, args)
     train_dataset, val_dataset, test_dataset = load_dataset.sampler_train(seed_sampler, args)
+    # print(len(val_dataset))
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     # pick_loader = DataLoader(pick_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
     config.niters_per_epoch = len(train_dataset) // config.batch_size
+
 
     # Model #######################################
 
@@ -385,7 +387,7 @@ def main():
         best_f1_score = 0
         best_threshold = 0.5
         config.re_threshold = None
-        for threshold in np.arange(0.5, 0.55, 0.05):
+        for threshold in np.arange(0.5, 0.95, 0.05):
             config.threshold = threshold
             f1_score = test(model, train_loader, val_loader, test_loader, 1, logger, False)
             print("The f1 score of threshold {} is {}".format(threshold, f1_score))
@@ -415,8 +417,8 @@ def main():
             adjust_learning_rate(base_lr, 0.992, optimizer, epoch+1, config.nepochs)
 
             # validation
-            if epoch == 40:
-                val_per_epoch = 1
+            # if epoch == 40:
+            #     val_per_epoch = 1
             if not config.is_test and (epoch % val_per_epoch == 0 or epoch == 0):
                 tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
                 with torch.no_grad():
@@ -483,6 +485,8 @@ def train(train_loader, model, optimizer, logger, epoch):
         target = target.cuda(non_blocking=True)
         imgs, target = Variable(imgs), Variable(target)
 
+        # return None
+
         description = ""
         # print("The class of the vector is:")
         # print(torch.Tensor.cpu(target[0]).detach().numpy())
@@ -517,27 +521,27 @@ def train(train_loader, model, optimizer, logger, epoch):
         loss.backward()
         optimizer.step()
 
-        if img_index < 10:
-            re = torch.Tensor.cpu(reconstructed[0]).detach().numpy()
-            ori = torch.Tensor.cpu(imgs[0]).detach().numpy()
-            temp = re
-            temp = temp.transpose(1, 2, 0)
-            temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
-            # temp = temp * 0.3081 + 0.1307
-            temp = temp * 255
-            temp = temp.astype(np.uint8)
-            img = Image.fromarray(temp)
-            img.save(os.path.join("cf_img", "{}_re.jpeg".format(img_index)))
-
-            ori = ori
-            ori = ori.transpose(1, 2, 0)
-            ori = ori * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
-            # ori = ori * 0.3081 + 0.1307
-            ori = ori * 255
-            ori = ori.astype(np.uint8)
-            ori = Image.fromarray(ori)
-            ori.save(os.path.join("cf_img", "{}_ori.jpeg".format(img_index)))
-            img_index += 1
+        # if img_index < 10:
+        #     re = torch.Tensor.cpu(reconstructed[0]).detach().numpy()
+        #     ori = torch.Tensor.cpu(imgs[0]).detach().numpy()
+        #     temp = re
+        #     temp = temp.transpose(1, 2, 0)
+        #     temp = temp * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+        #     # temp = temp * 0.3081 + 0.1307
+        #     temp = temp * 255
+        #     temp = temp.astype(np.uint8)
+        #     img = Image.fromarray(temp)
+        #     img.save(os.path.join("cf_img", "{}_re.jpeg".format(img_index)))
+        #
+        #     ori = ori
+        #     ori = ori.transpose(1, 2, 0)
+        #     ori = ori * (0.2023, 0.1994, 0.2010) + (0.4914, 0.4822, 0.4465)
+        #     # ori = ori * 0.3081 + 0.1307
+        #     ori = ori * 255
+        #     ori = ori.astype(np.uint8)
+        #     ori = Image.fromarray(ori)
+        #     ori.save(os.path.join("cf_img", "{}_ori.jpeg".format(img_index)))
+        #     img_index += 1
 
         pbar.set_description("[Step %d/%d]"%(step + 1, len(train_loader)) + description)
         logger.add_scalar('train/ce_loss', ce_loss, epoch * len(pbar) + step)
@@ -580,53 +584,121 @@ def train(train_loader, model, optimizer, logger, epoch):
 
     return train_acc
 
-def test_train(model, train_loader, optimizer):
-    open('%s/train_fea.txt' % config.save, 'w').close()
-    open('%s/train_tar.txt' % config.save, 'w').close()
-    open('%s/train_pre.txt' % config.save, 'w').close()
-    open('%s/train_rec.txt' % config.save, 'w').close()
+def test2(model, train_loader, val_loader, test_loader, epoch=0, logger=None, val=False,  device=torch.device('cuda')):
+    open('%s/test_fea.txt' % config.save, 'w').close()
+    open('%s/test_tar.txt' % config.save, 'w').close()
+    open('%s/test_pre.txt' % config.save, 'w').close()
+    open('%s/test_rec.txt' % config.save, 'w').close()
 
     model.eval()
-    bar_format = '{desc}[{elapsed}<{remaining},{rate_fmt}]'
-    pbar = tqdm(range(config.niters_per_epoch), file=sys.stdout, bar_format=bar_format, ncols=80)
-    dataloader = iter(train_loader)
-    for step in pbar:
+    total_ce_loss = 0
+    total_re_loss = 0
+    total_kl_loss = 0
+    total_contras_loss = 0
+    correct_val = 0
+    total_num = 0
+    pred_list = []
+    target_list = []
 
-        optimizer.zero_grad()
+    if len(val_loader) != 0:
+        for data_val, target_val in val_loader:
+            data_val, target_val = data_val.cuda(), target_val.cuda()
+            with torch.no_grad():
+                data_val, target_val = Variable(data_val), Variable(target_val)
 
-        minibatch = dataloader.next()
-        imgs = minibatch[0]
-        target = minibatch[1]
-        # print(target)
-        imgs = imgs.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
-        imgs, target = Variable(imgs), Variable(target)
+            latent, mu_val, latent_var, predict, output_val, de_val, outputs = model(data_val)
 
-        latent, latent_mu, latent_var, predict, predict_test, reconstructed, outputs = model(imgs)
-        z_latent_mu, y_latent_mu = torch.split(latent_mu, [config.z_dim, config.latent_dim32], dim=1)
+            if val:
+                total_num += len(target_val)
 
-        rec_loss = (reconstructed - imgs).pow(2).sum((3, 2, 1))
+                ce = nllloss(predict, target_val)
+                ce_loss = config.lamda * ce
+                total_ce_loss += ce_loss
 
-        outlabel = predict.data.max(1)[1]  # get the index of the max log-probability
+                vallabel = predict.data.max(1)[1]  # get the index of the max log-probability
+                correct_val += vallabel.eq(target_val.view_as(vallabel)).sum().item()
 
-        cor_fea = y_latent_mu[(outlabel == target)]
-        cor_tar = target[(outlabel == target)]
-        pred_label = torch.Tensor.cpu(outlabel).detach().numpy()
-        cor_fea = torch.Tensor.cpu(cor_fea).detach().numpy()
-        cor_tar = torch.Tensor.cpu(cor_tar).detach().numpy()
-        rec_loss = torch.Tensor.cpu(rec_loss).detach().numpy()
-        with open('%s/train_pre.txt' % config.save, 'ab') as f:
-            np.savetxt(f, pred_label, fmt='%f', delimiter=' ', newline='\r')
-            f.write(b'\n')
-        with open('%s/train_fea.txt' % config.save, 'ab') as f:
-            np.savetxt(f, cor_fea, fmt='%f', delimiter=' ', newline='\r')
-            f.write(b'\n')
-        with open('%s/train_tar.txt' % config.save, 'ab') as t:
-            np.savetxt(t, cor_tar, fmt='%d', delimiter=' ', newline='\r')
-            t.write(b'\n')
-        with open('%s/train_rec.txt' % config.save, 'ab') as m:
-            np.savetxt(m, rec_loss, fmt='%f', delimiter=' ', newline='\r')
-            m.write(b'\n')
+                target_list = target_list + target_val.squeeze().tolist()
+                pred_list = pred_list + vallabel.squeeze().tolist()
+
+            pre_val = output_val.data.max(1, keepdim=True)[1]  # get the index of the max log-probability
+            _, mu_val = torch.split(mu_val, [config.z_dim, config.latent_dim32], dim=1)
+            mu_val = torch.Tensor.cpu(mu_val).detach().numpy()
+            target_val_np = torch.Tensor.cpu(target_val).detach().numpy()
+            pre_val = torch.Tensor.cpu(pre_val).detach().numpy()
+            rec_val = torch.Tensor.cpu(rec_val).detach().numpy()
+
+            with open('%s/test_fea.txt' % config.save, 'ab') as f_val:
+                np.savetxt(f_val, mu_val, fmt='%f', delimiter=' ', newline='\r')
+                f_val.write(b'\n')
+            with open('%s/test_tar.txt' % config.save, 'ab') as t_val:
+                np.savetxt(t_val, target_val_np, fmt='%d', delimiter=' ', newline='\r')
+                t_val.write(b'\n')
+            with open('%s/test_pre.txt' % config.save, 'ab') as p_val:
+                np.savetxt(p_val, pre_val, fmt='%d', delimiter=' ', newline='\r')
+                p_val.write(b'\n')
+
+        if val:
+
+            closed_val_f1 = f1_score(target_list, pred_list, average='macro')
+            total_val_loss = total_ce_loss + total_kl_loss + total_re_loss + total_contras_loss
+            val_loss = total_val_loss / total_num
+            val_rec = total_re_loss / total_num
+            val_kl = total_kl_loss / total_num
+            val_ce = total_ce_loss / total_num
+            val_contras = total_contras_loss / total_num
+            val_acc = float(100 * correct_val) / total_num
+            print("The validation ce loss is: {}".format(total_ce_loss))
+            print("The validation re loss is: {}".format(total_re_loss))
+            print("The validation kl loss is: {}".format(total_kl_loss / config.beta))
+            print("The validation contras loss is: {}".format(total_contras_loss))
+            print("The validation total loss is: {}".format(total_val_loss))
+            if True:
+                logger.add_scalar("val_loss/val_loss_all", val_loss, epoch)
+                logger.add_scalar("val_loss/val_rec_loss", val_rec, epoch)
+                logger.add_scalar("val_loss/val_kl_loss", val_kl / config.beta, epoch)
+                logger.add_scalar("val_loss/val_ce_loss", val_ce, epoch)
+                logger.add_scalar("val_loss/val_contras_loss", val_contras, epoch)
+                logger.add_scalar("Acc_val/acc", val_acc, epoch)
+                logger.add_scalar("Acc_val/closed_f1_score", closed_val_f1, epoch)
+
+    for data_omn, target_omn in test_loader:
+        tar_omn = torch.from_numpy(config.num_classes * np.ones(target_omn.shape[0]))
+        data_omn = data_omn.cuda()
+        with torch.no_grad():
+            data_omn = Variable(data_omn)
+        _, mu_omn, _, _, output_omn, de_omn, _ = model(data_omn)
+        output_omn = torch.exp(output_omn)
+        # prob_omn = output_omn.max(1)[0]  # get the value of the max probability
+        pre_omn = output_omn.max(1, keepdim=True)[1]  # get the index of the max log-probability
+        rec_omn = (de_omn - data_omn).pow(2).sum((3, 2, 1))
+        _, mu_omn = torch.split(mu_omn, [config.z_dim, config.latent_dim32], dim=1)
+        mu_omn = torch.Tensor.cpu(mu_omn).detach().numpy()
+        tar_omn = torch.Tensor.cpu(tar_omn).detach().numpy()
+        pre_omn = torch.Tensor.cpu(pre_omn).detach().numpy()
+        rec_omn = torch.Tensor.cpu(rec_omn).detach().numpy()
+
+        with open('%s/test_fea.txt' % config.save, 'ab') as f_test:
+            np.savetxt(f_test, mu_omn, fmt='%f', delimiter=' ', newline='\r')
+            f_test.write(b'\n')
+        with open('%s/test_tar.txt' % config.save, 'ab') as t_test:
+            np.savetxt(t_test, tar_omn, fmt='%d', delimiter=' ', newline='\r')
+            t_test.write(b'\n')
+        with open('%s/test_pre.txt' % config.save, 'ab') as p_test:
+            np.savetxt(p_test, pre_omn, fmt='%d', delimiter=' ', newline='\r')
+            p_test.write(b'\n')
+        with open('%s/test_rec.txt' % config.save, 'ab') as l_test:
+            np.savetxt(l_test, rec_omn, fmt='%f', delimiter=' ', newline='\r')
+            l_test.write(b'\n')
+
+    perf = ocr_test(config, model, train_loader, val_loader, test_loader)
+    if val and perf[-1] != 0:
+        f1_matrix = np.loadtxt(config.save + '/performance.txt')
+        precision = f1_matrix[-1][3]
+        recall = f1_matrix[-1][4]
+        f1 = (precision * recall) / (precision + recall)
+        logger.add_scalar('Acc_val/open_f1_score', f1, epoch)
+    return perf[-1]
 
 def test(model, train_loader, val_loader, test_loader, epoch=0, logger=None, val=False,  device=torch.device('cuda')):
     open('%s/test_fea.txt' % config.save, 'w').close()
@@ -644,86 +716,87 @@ def test(model, train_loader, val_loader, test_loader, epoch=0, logger=None, val
     pred_list = []
     target_list = []
 
-    for data_val, target_val in val_loader:
-        data_val, target_val = data_val.cuda(), target_val.cuda()
-        with torch.no_grad():
-            data_val, target_val = Variable(data_val), Variable(target_val)
+    if len(val_loader) != 0:
+        for data_val, target_val in val_loader:
+            data_val, target_val = data_val.cuda(), target_val.cuda()
+            with torch.no_grad():
+                data_val, target_val = Variable(data_val), Variable(target_val)
 
-        latent, mu_val, latent_var, predict, output_val, de_val, outputs = model(data_val)
+            latent, mu_val, latent_var, predict, output_val, de_val, outputs = model(data_val)
+
+            if val:
+                total_num += len(target_val)
+                rec = reconstruction_function(de_val, data_val)
+                re_loss = config.wre * rec
+                total_re_loss += re_loss
+
+                ce = nllloss(predict, target_val)
+                ce_loss = config.lamda * ce
+                total_ce_loss += ce_loss
+
+                contras, yh = model.module.contrastive_loss(data_val, mu_val, outputs, target_val, de_val)
+                contras_loss = config.wcontras * contras
+                total_contras_loss += contras_loss
+
+                z_latent_mu, y_latent_mu = torch.split(mu_val, [config.z_dim, config.latent_dim32], dim=1)
+                z_latent_var, y_latent_var = torch.split(latent_var, [config.z_dim, config.latent_dim32], dim=1)
+                pm_z, pv_z = torch.zeros(z_latent_mu.shape).cuda(), torch.ones(z_latent_var.shape).cuda()
+                pm, pv = torch.zeros(y_latent_mu.shape).cuda(), torch.ones(y_latent_var.shape).cuda()
+                kl_latent = kl_normal(y_latent_mu, y_latent_var, pm, pv, yh)
+                kl_z = kl_normal(z_latent_mu, z_latent_var, pm_z, pv_z, 0)
+                kl_loss = config.beta * (kl_latent + config.beta_z * kl_z)
+                total_kl_loss += kl_loss
+
+                vallabel = predict.data.max(1)[1]  # get the index of the max log-probability
+                correct_val += vallabel.eq(target_val.view_as(vallabel)).sum().item()
+
+                target_list = target_list + target_val.squeeze().tolist()
+                pred_list = pred_list + vallabel.squeeze().tolist()
+
+            pre_val = output_val.data.max(1, keepdim=True)[1]  # get the index of the max log-probability
+            rec_val = (de_val - data_val).pow(2).sum((3, 2, 1))
+            _, mu_val = torch.split(mu_val, [config.z_dim, config.latent_dim32], dim=1)
+            mu_val = torch.Tensor.cpu(mu_val).detach().numpy()
+            target_val_np = torch.Tensor.cpu(target_val).detach().numpy()
+            pre_val = torch.Tensor.cpu(pre_val).detach().numpy()
+            rec_val = torch.Tensor.cpu(rec_val).detach().numpy()
+
+            with open('%s/test_fea.txt' % config.save, 'ab') as f_val:
+                np.savetxt(f_val, mu_val, fmt='%f', delimiter=' ', newline='\r')
+                f_val.write(b'\n')
+            with open('%s/test_tar.txt' % config.save, 'ab') as t_val:
+                np.savetxt(t_val, target_val_np, fmt='%d', delimiter=' ', newline='\r')
+                t_val.write(b'\n')
+            with open('%s/test_pre.txt' % config.save, 'ab') as p_val:
+                np.savetxt(p_val, pre_val, fmt='%d', delimiter=' ', newline='\r')
+                p_val.write(b'\n')
+            with open('%s/test_rec.txt' % config.save, 'ab') as l_val:
+                np.savetxt(l_val, rec_val, fmt='%f', delimiter=' ', newline='\r')
+                l_val.write(b'\n')
 
         if val:
-            total_num += len(target_val)
-            rec = reconstruction_function(de_val, data_val)
-            re_loss = config.wre * rec
-            total_re_loss += re_loss
 
-            ce = nllloss(predict, target_val)
-            ce_loss = config.lamda * ce
-            total_ce_loss += ce_loss
-
-            contras, yh = model.module.contrastive_loss(data_val, mu_val, outputs, target_val, de_val)
-            contras_loss = config.wcontras * contras
-            total_contras_loss += contras_loss
-
-            z_latent_mu, y_latent_mu = torch.split(mu_val, [config.z_dim, config.latent_dim32], dim=1)
-            z_latent_var, y_latent_var = torch.split(latent_var, [config.z_dim, config.latent_dim32], dim=1)
-            pm_z, pv_z = torch.zeros(z_latent_mu.shape).cuda(), torch.ones(z_latent_var.shape).cuda()
-            pm, pv = torch.zeros(y_latent_mu.shape).cuda(), torch.ones(y_latent_var.shape).cuda()
-            kl_latent = kl_normal(y_latent_mu, y_latent_var, pm, pv, yh)
-            kl_z = kl_normal(z_latent_mu, z_latent_var, pm_z, pv_z, 0)
-            kl_loss = config.beta * (kl_latent + config.beta_z * kl_z)
-            total_kl_loss += kl_loss
-
-            vallabel = predict.data.max(1)[1]  # get the index of the max log-probability
-            correct_val += vallabel.eq(target_val.view_as(vallabel)).sum().item()
-
-            target_list = target_list + target_val.squeeze().tolist()
-            pred_list = pred_list + vallabel.squeeze().tolist()
-
-        pre_val = output_val.data.max(1, keepdim=True)[1]  # get the index of the max log-probability
-        rec_val = (de_val - data_val).pow(2).sum((3, 2, 1))
-        _, mu_val = torch.split(mu_val, [config.z_dim, config.latent_dim32], dim=1)
-        mu_val = torch.Tensor.cpu(mu_val).detach().numpy()
-        target_val_np = torch.Tensor.cpu(target_val).detach().numpy()
-        pre_val = torch.Tensor.cpu(pre_val).detach().numpy()
-        rec_val = torch.Tensor.cpu(rec_val).detach().numpy()
-
-        with open('%s/test_fea.txt' % config.save, 'ab') as f_val:
-            np.savetxt(f_val, mu_val, fmt='%f', delimiter=' ', newline='\r')
-            f_val.write(b'\n')
-        with open('%s/test_tar.txt' % config.save, 'ab') as t_val:
-            np.savetxt(t_val, target_val_np, fmt='%d', delimiter=' ', newline='\r')
-            t_val.write(b'\n')
-        with open('%s/test_pre.txt' % config.save, 'ab') as p_val:
-            np.savetxt(p_val, pre_val, fmt='%d', delimiter=' ', newline='\r')
-            p_val.write(b'\n')
-        with open('%s/test_rec.txt' % config.save, 'ab') as l_val:
-            np.savetxt(l_val, rec_val, fmt='%f', delimiter=' ', newline='\r')
-            l_val.write(b'\n')
-
-    if val:
-
-        closed_val_f1 = f1_score(target_list, pred_list, average='macro')
-        total_val_loss = total_ce_loss + total_kl_loss + total_re_loss + total_contras_loss
-        val_loss = total_val_loss / total_num
-        val_rec = total_re_loss / total_num
-        val_kl = total_kl_loss / total_num
-        val_ce = total_ce_loss / total_num
-        val_contras = total_contras_loss / total_num
-        val_acc = float(100 * correct_val) / total_num
-        print("The validation ce loss is: {}".format(total_ce_loss))
-        print("The validation re loss is: {}".format(total_re_loss))
-        print("The validation kl loss is: {}".format(total_kl_loss / config.beta))
-        print("The validation contras loss is: {}".format(total_contras_loss))
-        print("The validation total loss is: {}".format(total_val_loss))
-        if True:
-            logger.add_scalar("val_loss/val_loss_all", val_loss, epoch)
-            logger.add_scalar("val_loss/val_rec_loss", val_rec, epoch)
-            logger.add_scalar("val_loss/val_kl_loss", val_kl / config.beta, epoch)
-            logger.add_scalar("val_loss/val_ce_loss", val_ce, epoch)
-            logger.add_scalar("val_loss/val_contras_loss", val_contras, epoch)
-            logger.add_scalar("Acc_val/acc", val_acc, epoch)
-            logger.add_scalar("Acc_val/closed_f1_score", closed_val_f1, epoch)
+            closed_val_f1 = f1_score(target_list, pred_list, average='macro')
+            total_val_loss = total_ce_loss + total_kl_loss + total_re_loss + total_contras_loss
+            val_loss = total_val_loss / total_num
+            val_rec = total_re_loss / total_num
+            val_kl = total_kl_loss / total_num
+            val_ce = total_ce_loss / total_num
+            val_contras = total_contras_loss / total_num
+            val_acc = float(100 * correct_val) / total_num
+            print("The validation ce loss is: {}".format(total_ce_loss))
+            print("The validation re loss is: {}".format(total_re_loss))
+            print("The validation kl loss is: {}".format(total_kl_loss / config.beta))
+            print("The validation contras loss is: {}".format(total_contras_loss))
+            print("The validation total loss is: {}".format(total_val_loss))
+            if True:
+                logger.add_scalar("val_loss/val_loss_all", val_loss, epoch)
+                logger.add_scalar("val_loss/val_rec_loss", val_rec, epoch)
+                logger.add_scalar("val_loss/val_kl_loss", val_kl / config.beta, epoch)
+                logger.add_scalar("val_loss/val_ce_loss", val_ce, epoch)
+                logger.add_scalar("val_loss/val_contras_loss", val_contras, epoch)
+                logger.add_scalar("Acc_val/acc", val_acc, epoch)
+                logger.add_scalar("Acc_val/closed_f1_score", closed_val_f1, epoch)
 
     for data_omn, target_omn in test_loader:
         tar_omn = torch.from_numpy(config.num_classes * np.ones(target_omn.shape[0]))

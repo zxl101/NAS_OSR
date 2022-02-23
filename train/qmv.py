@@ -52,6 +52,8 @@ def revise_cf(args, lvae, feature_y_mean, val_loader, test_loader, rec_loss=None
     test_rec_cf = lvae.module.rec_loss_cf(feature_y_mean, val_loader, test_loader, args)
     test_rec_cf = test_rec_cf.cpu().numpy()
     test_pre = np.loadtxt('%s/test_pre.txt' %args.save)
+    # print(len(test_rec_cf))
+    # print(len(rec_thres))
     test_pre[(test_rec_cf > rec_thres)] = args.num_classes
     open('%s/test_pre_after.txt' %args.save , 'w').close()  # clear
     np.savetxt('%s/test_pre_after.txt' %args.save , test_pre, delimiter=' ', fmt='%d')
@@ -215,7 +217,7 @@ def get_mean_y(train_feature, train_target, args):
 
     return feature_mean_y
 
-def ocr_test(args, lvae, train_loader, val_loader, test_loader):
+def ocr_test(args, lvae, train_loader, val_loader, test_loader, reconstruction=True):
     if not args.use_model:
         revise(args)
         gau = GAU(args)
@@ -269,7 +271,8 @@ def ocr_test(args, lvae, train_loader, val_loader, test_loader):
 
                 revise_cf(args, lvae, feature_y_mean, val_loader, test_loader, rec_loss=train_rec_loss)
 
-        else:
+        # else:
+        elif reconstruction:
             train_rec_loss = train_rec_loss.cpu().numpy()
             revise(args, rec_loss=train_rec_loss)
 
@@ -428,7 +431,7 @@ def auroc_cal(args, lvae, train_loader, val_loader, test_loader):
             fn = np.sum(np.logical_and(result == False, testtar==(labelnum)))
             tn = np.sum(np.logical_and(result == False, testtar!=(labelnum)))
 
-            tp_fp_list.append([tp/(tp+fn), fp/(tn+fp)])
+            tp_fp_list.append([tp/(tp+fn), fp/(tn+fp), tp/(tp+fp)])
 
     np.savetxt('%s/tpr_fpr.txt' % args.save, np.array(tp_fp_list))
 

@@ -47,6 +47,8 @@ def revise_cf(args, lvae, feature_y_mean, val_loader, test_loader, rec_loss=None
     test_rec_cf = lvae.module.rec_loss_cf(feature_y_mean, val_loader, test_loader, args)
     test_rec_cf = test_rec_cf.cpu().numpy()
     test_pre = np.loadtxt('%s/test_pre.txt' %args.save)
+    print(len(test_rec_cf))
+    print(len(rec_thres))
     test_pre[(test_rec_cf > rec_thres)] = args.num_classes
     open('%s/test_pre_after.txt' %args.save , 'w').close()  # clear
     np.savetxt('%s/test_pre_after.txt' %args.save , test_pre, delimiter=' ', fmt='%d')

@@ -393,14 +393,14 @@ class TinyImageNet_Dataset(Dataset):
         # self.classDict = {'0': 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8,
         #                   '9': 9}
         self.transform_train = transforms.Compose([
-            transforms.Resize(64),
-            transforms.RandomResizedCrop(64, scale=(0.7, 1.0)),
+            transforms.Resize(224),
+            transforms.RandomResizedCrop(224, scale=(0.7, 1.0)),
             transforms.RandomHorizontalFlip(0),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406],
                                  [0.229, 0.224, 0.225]),
         ])
-        self.transform_test = transforms.Compose([transforms.Resize(64),
+        self.transform_test = transforms.Compose([transforms.Resize(224),
                                                   transforms.ToTensor(),
                                                   transforms.Normalize([0.485, 0.456, 0.406],
                                                   [0.229, 0.224, 0.225])])
@@ -410,9 +410,9 @@ class TinyImageNet_Dataset(Dataset):
     def sampler_search(self, seed, args):
         if seed is not None:
             random.seed(seed)
-        seen_classes = random.sample(range(0, 200), 70)
+        seen_classes = random.sample(range(0, 200), 15)
         unseen_classes = [idx for idx in range(200) if idx not in seen_classes]
-        val_classes = random.sample(unseen_classes, 30)
+        val_classes = random.sample(unseen_classes, 5)
         unseen_classes = [idx for idx in unseen_classes if idx not in val_classes]
         # unseen_classes = [idx for idx in range(10) if idx not in seen_classes]
 
@@ -425,11 +425,14 @@ class TinyImageNet_Dataset(Dataset):
     def sampler_train(self, seed, args):
         if seed is not None:
             random.seed(seed)
-        seen_classes = random.sample(range(0, 200), 70)
+        seen_classes = random.sample(range(0, 200), 15)
         unseen_classes = [idx for idx in range(200) if idx not in seen_classes]
-        val_classes = random.sample(unseen_classes, 30)
+        val_classes = random.sample(unseen_classes, 5)
         unseen_classes = [idx for idx in unseen_classes if idx not in val_classes]
         seen_classes = seen_classes + val_classes
+        # print(seen_classes)
+        # print()
+        # print(unseen_classes)
 
         osr_trainset, osr_valset, osr_testset = construct_ocr_dataset_aug(self.trainset, self.testset,
                                                                       seen_classes, None, unseen_classes,
@@ -503,19 +506,21 @@ def construct_ocr_dataset_aug(trainset, testset, seen_classes, val_classes, unse
             [get_class_i(testset.data, testset.labels, idx) for idx in unseen_classes],
             transform_test)
     elif args.dataset in ['TinyImageNet']:
-        # print(trainset.)
+        # print(len(testset.targets))
+        # print([get_class_i(trainset.imgs, trainset.targets, idx) for idx in seen_classes])
         osr_trainset = DatasetBuilder(
             [get_class_i(trainset.imgs, trainset.targets, idx) for idx in seen_classes],
             transform_train)
-
+        # print(len(testset.imgs))
+        # print([get_class_i(testset.imgs, testset.targets, idx) for idx in seen_classes])
         osr_valset = DatasetBuilder(
             [get_class_i(testset.imgs, testset.targets, idx) for idx in seen_classes],
             transform_test)
 
-        if val_classes != None:
-            osr_pickset = DatasetBuilder(
-                [get_class_i(testset.imgs, testset.targets, idx) for idx in val_classes],
-                transform_test)
+        # if val_classes != None:
+        #     osr_pickset = DatasetBuilder(
+        #         [get_class_i(testset.imgs, testset.targets, idx) for idx in val_classes],
+        #         transform_test)
 
         osr_testset = DatasetBuilder(
             [get_class_i(testset.imgs, testset.targets, idx) for idx in unseen_classes],
