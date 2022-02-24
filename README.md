@@ -35,3 +35,13 @@ By default they are downloaed to data folders under search and train folders res
 
 # Training
 ## Architecture Search
+1. Search \
+  cd search \
+  sh search.sh \
+2. Train from scratch on target dataset \
+  cd NAS_OSR/train \ 
+  + Copy the folder which contains the searched architecture into NAS_OSR/train/
+  + Set the name of your searched folder *C.load_path = "used_searched_models/4loss_os_f1/search/"* in config_train.py on line 66 \
+  sh train.sh \### Please choose the dataset you want to train on and comment all other lines \
+# Acknowledgements
+This repository makes use of code from [FasterSeg](https://github.com/VITA-Group/FasterSeg) and [GCM-CF](https://github.com/yue-zhongqi/gcm-cf/tree/main/osr).
