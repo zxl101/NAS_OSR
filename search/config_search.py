@@ -62,8 +62,8 @@ C.momentum = 0.9 # SGD momentum
 C.weight_decay = 5e-4 # SGD weight decay
 C.num_workers = 4 # workers for dataloader
 C.train_scale_array = [0.75, 1, 1.25] # scale factors for augmentation during training
-C.nepochs = 300
-C.pretrain_nepochs = 100
+C.nepochs = 130
+C.pretrain_nepochs = 30
 """Eval Config"""
 C.eval_stride_rate = 5 / 6 # stride for crop based evaluation. Not used in this repo
 C.eval_scale_array = [1, ] # multi-scale evaluation

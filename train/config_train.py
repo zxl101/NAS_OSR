@@ -62,7 +62,7 @@ if C.mode == "teacher":
     C.branch = [3] # number of output branches
     C.width_mult_list = [1.,] # selection choices for channel pruning
     C.stem_head_width = [(1, 1)] # width ratio (#channel / Fch) for [teacher, student]
-    C.load_path = "searched_CIFAR50" # path to the searched directory
+    # C.load_path = "searched_CIFAR50" # path to the searched directory
     C.load_path = "used_searched_models/4loss_os_f1/search/"
     C.load_epoch = "last" # "last" or "int" (e.g. "30"): which epoch to load from the searched architecture
     C.batch_size = 64
