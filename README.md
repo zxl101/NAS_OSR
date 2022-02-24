@@ -34,7 +34,6 @@ The following datasets are used to train/evaluate our network
 By default they are downloaed to data folders under search and train folders respectively. If you wish to change the location of the datasets, please modify dataloader.py in search and train folders.
 
 # Training
-## Architecture Search
 1. Search \
   cd search \
   sh search.sh \
